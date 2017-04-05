@@ -13,16 +13,16 @@
 
 from __future__ import print_function
 import sys
-import time
 import logging
 import logging.handlers
-import os
-import urllib2
-from bs4 import BeautifulSoup
 from optidb.model import *
 from utils import utcnow
 import csv
 import pandas as pd
+from selenium import webdriver
+import os
+import time
+import zipfile
 from utils import config     # connect to local database instead of Optimode
 sys.path.append('../')
 
@@ -30,10 +30,13 @@ provider = 'USA'
 __version__ = 'V1.0.0'
 unknown_airports = set()
 unknown_airlines = set()
-# tmp_dir = '/tmp/USA'
-tmp_dir = '/home/laurent/Téléchargements/'
+tmp_dir = '/tmp/USA'
 # full_url = 'http://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=292'   Another type of file, less well defined
 full_url = 'http://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=293'   # Download file by selecting all fields
+
+if not os.path.isdir(tmp_dir):
+     os.mkdir(tmp_dir)
+
 
 logging.basicConfig(level=logging.DEBUG, format=0)
 log = logging.getLogger('load_USA')
@@ -74,12 +77,78 @@ def get_airline_codes():
     return dict((a.iata_code, a) for a in airlines if a.iata_code)
 
 
-def download_files():
+def download_one(month, year):
     """
-    Need to develop the code to download the files from the website directly:
-        - fill in form to include all fields
-        - select year and months
+    Download a single year_month's flights. It is not easy to identify where the files are located, so this function
+    mimics a user filling the form, selecting year and month as well as all variables, and clicking download.
+    :param month: integer
+    :param year: integer
+    :return: a single renamed csv file
     """
+    end_name = "US_Segments_%s-%s.csv" % (month, year)
+
+    # Set chrome options and reach the website
+    options = webdriver.ChromeOptions()
+    options.add_experimental_option("prefs", {
+        "download.default_directory": tmp_dir,
+        "download.prompt_for_download": False,
+    })
+    driver = webdriver.Chrome(chrome_options=options)
+    driver.implicitly_wait(10)
+    driver.get(full_url)
+    assert "RITA" in driver.title
+
+    # Select the demanded year and month
+    driver.find_element_by_xpath("//select[@id='XYEAR']/option[@value=%s]" % year).click()
+    driver.find_element_by_xpath("//select[@id='FREQUENCY']/option[@value=%s]" % month).click()
+
+    # Click the "select all variables checkbox", then click download
+    driver.find_element_by_name('AllVars').click()
+    driver.find_element_by_name("Download").click()
+
+    # Wait for file to be downloaded
+    time.sleep(20)
+    driver.close()
+
+    # Identify downloaded zip file, then unzip its content and delete zip file
+    zip_name = max([tmp_dir + "/" + f for f in os.listdir(tmp_dir)], key=os.path.getctime)
+    zip_ref = zipfile.ZipFile(zip_name, 'r')
+    zip_ref.extractall(tmp_dir)
+    zip_ref.close()
+    os.remove(zip_name)
+
+    # Identify csv file name, and rename to "US_Segment_month-year.csv"
+    csv_name = max([tmp_dir + "/" + f for f in os.listdir(tmp_dir)], key=os.path.getctime)
+    os.rename(os.path.join(tmp_dir, csv_name), os.path.join(tmp_dir, end_name))
+    log.info("%s downloaded", end_name)
+
+    return end_name
+
+
+def robot_download(month, year):
+    """
+    Depending on whether month and/or year are single or multiple values, iterate to download the relevant files
+    :param month: integer or tuple of integers
+    :param year: integer or tuple of integers
+    :return: list of downloaded csv files
+    """
+    csv_files = []
+    if not isinstance(month, tuple) and not isinstance(year, tuple):
+        csv_files.append(download_one(month, year))
+    else:
+        if isinstance(month, tuple) and isinstance(year, tuple):
+            for y in year:
+                for m in month:
+                    csv_files.append(download_one(m, y))
+        else:
+            if isinstance(month, tuple):
+                for m in month:
+                    csv_files.append(download_one(m, year))
+            else:
+                for y in year:
+                    csv_files.append(download_one(month, y))
+    return csv_files
+
 
 def get_data(csv_files):
     """
@@ -186,94 +255,19 @@ def get_data(csv_files):
                             print(row_nb / len(dict_reader) * 100, "%")
                 log.info('stored: %r', bulk.nresult)
 
-"""
-def download_one(date):
-    '''
-    Download a single month's flights
-    '''
-    month = date.month
-    year = date.year
-    month_name = date.strftime('%B')
-    headers = {
-        'Pragma': 'no-cache',
-        'Origin': 'http://www.transtats.bts.gov',
-        'Accept-Encoding': 'gzip, deflate',
-        'Accept-Language': 'en-US,en;q=0.8',
-        'Upgrade-Insecure-Requests': '1',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.87 Safari/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Referer': 'https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=293&DB_Short_Name=Segment',
-        'Connection': 'keep-alive',
-        'DNT': '1',
-    }
-    os.makedirs('timeseries', exist_ok=True)
-    # long URL truncated, check the notebook
-    data = 'UserTableName=On_Time_Performance&DBShortName=On_Time&RawDataTable=T_ONTIME&sqlstr=+SELECT+'
 
-    r = requests.post('http://www.transtats.bts.gov/DownLoad_Table.asp?Table_ID=293&Has_Group=3&Is_Zipped=0',
-                      headers=headers, data=data.format(year=year, month=month, month_name=month_name),
-                      stream=True)
-    fp = os.path.join('timeseries', '{}-{}.zip'.format(year, month))
-
-    with open(fp, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=1024):
-            if chunk:
-                f.write(chunk)
-    return fp
-
-def download_many(start, end):
-    months = pd.date_range(start, end=end, freq='M')
-    # We could easily parallelize this loop.
-    for i, month in enumerate(months):
-        download_one(month)
-
-def unzip_one(fp):
-    zf = zipfile.ZipFile(fp)
-    csv = zf.extract(zf.filelist[0])
-    return csv
-
-def time_to_datetime(df, columns):
-    '''
-    Combine all time items into datetimes.
-
-    2014-01-01,1149.0 -> 2014-01-01T11:49:00
-    '''
-    def converter(col):
-        timepart = (col.astype(str)
-                       .str.replace('\.0$', '')  # NaNs force float dtype
-                       .str.pad(4, fillchar='0'))
-        return  pd.to_datetime(df['fl_date'] + ' ' +
-                               timepart.str.slice(0, 2) + ':' +
-                               timepart.str.slice(2, 4),
-                               errors='coerce')
-        return datetime_part
-    df[columns] = df[columns].apply(converter)
-    return df
-
-
-def read_one(fp):
-    df = (pd.read_csv(fp, encoding='latin1')
-            .rename(columns=str.lower)
-            .drop('unnamed: 21', axis=1)
-            .pipe(time_to_datetime, ['dep_time', 'arr_time', 'crs_arr_time',
-                                     'crs_dep_time'])
-            .assign(fl_date=lambda x: pd.to_datetime(x['fl_date'])))
-    return df
-download_many('2000-01-01', '2016-01-01')
-
-zips = glob.glob(os.path.join('timeseries', '*.zip'))
-csvs = [unzip_one(fp) for fp in zips]
-dfs = [read_one(fp) for fp in csvs]
-df = pd.concat(dfs, ignore_index=True)
-"""
 
 def main():
     log.info('Starting to get data from Bureau of Transportation Statistics')
     start_time = time.time()
     open_db()
-    # download_files() # Need to develop the code to download the files from the website directly (fill in form)
+    year = str(input("Enter year(s) to download (separated by a comma"))
+    if ',' in year:
+        year = year.split(',')
+    month = input("Enter month number(s) (separated by a comma")
+    if ',' in month:
+        month = month.split(',')
+    csv_files = robot_download(month, year)
     # csv_files = os.listdir(tmp_dir)
     csv_files = ["US_Segments_2014.csv", "US_Segments_2015.csv", "US_Segments_2016.csv"]
     get_data(csv_files)
