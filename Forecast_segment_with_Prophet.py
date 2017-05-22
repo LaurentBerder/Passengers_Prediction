@@ -126,7 +126,7 @@ def main():
     forecast = forecast.loc[forecast['ds'] > (start_date + "-01")]
     model.history = model.history.loc[model.history['ds'] > (start_date + "-01")]
 
-    # Since there is no weekly data, remove the weekly columns to avoid getting an empty plot
+    # Since there is no weekly data, remove the weekly columns to avoid getting an empty plot (no longer needed with more recent versions of Prophet)
     forecast = forecast[['ds', 'cap', 't', 'trend', 'seasonal_lower', 'seasonal_upper', 'trend_lower', 'trend_upper',
                          'yhat_lower', 'yhat_upper', 'yearly', 'yearly_lower', 'yearly_upper', 'seasonal', 'yhat']]
     model.plot(forecast).show()
