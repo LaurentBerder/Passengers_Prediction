@@ -12,40 +12,50 @@
 # -------------------------------------------------------------------------------
 
 from __future__ import print_function
-import sys
 import time
-import logging
-import logging.handlers
-import os
-import urllib2
-from bs4 import BeautifulSoup
-from urllib import urlopen, urlretrieve, quote
-from optidb.model import *
-from utils import utcnow
+import argparse
 import pandas as pd
 import numpy as np
 from unidecode import unidecode
-import re
+import logging
+import logging.handlers
+import os
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+import sys
 sys.path.append('../')
+from optidb.model import *
+from utils import utcnow
+from utils.logging_utils import BackupFileHandler
+
 
 provider = 'Mexico'
 provider_tag = 'query_providers.%s' % provider
 __version__ = 'V1.0.0'
-unknown_airports = set()
+unknown_airports = pd.DataFrame(columns=['city_name', 'passengers'])
+no_capa = list()
 tmp_dir = '/tmp/mexico'
 base_url = 'http://www.sct.gob.mx/'
-end_url = 'transporte-y-medicina-preventiva/aeronautica-civil/5-estadisticas/53-estadistica-operacional-de-aerolineas-air-carrier-operational-statistics/'
+end_url = 'transporte-y-medicina-preventiva/aeronautica-civil/5-estadisticas/53-estadistica-operacional-de-aerolineas-traffic-statistics-by-airline/'
 
-logging.basicConfig(level=logging.DEBUG, format=0)
-log = logging.getLogger('load_colombia')
-log.setLevel(logging.DEBUG)
 
-log.info("Updating db with new file contents from Mexico's government website, version %s...", __version__)
+
+logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=logging_format)
+
+handler = BackupFileHandler(filename='load_Mexico.log', mode='w', backupCount=5)
+formatter = logging.Formatter(logging_format)
+handler.setFormatter(formatter)
+
+main_log = logging.getLogger()  # le root handler
+main_log.addHandler(handler)
+
+log = logging.getLogger('load_Mexico')
 
 
 def open_db():
     #config['ming.url'] = 'mongodb://localhost/'     # connect to local database instead of Optimode
-    Model.init_db()
+    Model.init_db(def_w=True)
 
 
 class External_Segment(Model):
@@ -56,65 +66,123 @@ class External_Segment_Tmp(Model):
     __collection__ = 'external_segment_laurent_tests'
 
 
-def download_files():
-    """
-    Get files from the web site
-    The files are downloaded to 'tmp_dir' directory
-    :return:
-    """
+def download_single_file(year):
+    year = str(year)
+    end_name = "Mexico-%s.xlsx" % year
+    if end_name not in os.listdir(tmp_dir):
+
+        # Set chrome options and reach the website
+        options = webdriver.ChromeOptions()
+        options.add_experimental_option("prefs", {
+            "download.default_directory": tmp_dir,
+            "download.prompt_for_download": False,
+        })
+        driver = webdriver.Chrome(chrome_options=options)
+        driver.implicitly_wait(10)
+        driver.get(base_url + end_url)
+
+        # Select the demanded year and month
+        file_link = driver.find_element_by_xpath("//*[contains(text(), 'origen-destino')]")
+        if year in file_link.get_attribute('href'):
+            file_link.click()
+        else:
+            driver.find_element_by_xpath("//*[contains(text(), '1992')]").send_keys(Keys.CONTROL + Keys.SHIFT + Keys.ENTER)
+            driver.switch_to.window(driver.window_handles[1])
+            driver.find_element_by_xpath("//*[contains(text(), 'Monthly Traffic Statistics')]").click()
+            driver.find_element_by_xpath(
+                "//a[contains(text(), '%s') and contains(text(), 'destino')]" % year).click()
+
+        time.sleep(10)  # Wait until file has finished downloading
+        # Identify latest downloaded excel file name, and rename to "India_international_quarter-year.xlsx"
+        xlsx_name = max([tmp_dir + "/" + f for f in os.listdir(tmp_dir)], key=os.path.getctime)
+        os.rename(os.path.join(tmp_dir, xlsx_name), os.path.join(tmp_dir, end_name))
+        log.info("%s downloaded", end_name)
+
+        driver.quit()
+    return end_name
+
+
+def download_files(year):
     log.info('Getting files on the web')
-    u = urlopen(base_url + end_url)
-    try:
-        html = u.read().decode('utf-8')
-    finally:
-        u.close()
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    if not os.path.isdir(tmp_dir):
-        os.mkdir(tmp_dir)
-
-    # Select all A elements with href attributes containing URLs starting with http://
-    for link in soup.select('a[href^="fileadmin"]'):
-        href = link.get('href')
-        # Make sure it has one of the correct extensions
-        filename = tmp_dir + "/" + href.rsplit('/', 1)[-1]
-        # Download Origin/Destination files later than 2001 not already downloaded
-        if "sase" in filename and not os.path.exists(filename):
-            urlretrieve(base_url + href, filename)
-            print('File', filename, 'downloaded')
-
+    xlsx_files = []
+    for y in year:
+        xlsx_files.append(download_single_file(y))
     xlsx_files = os.listdir(tmp_dir)
-
     return xlsx_files
 
 
-def find_airport_by_name(airport_name, tab_name):
+def get_capa(year_month, origin, destination):
+    """
+    For international flights, select airports of origin/destination which have capacity between them for the selected
+    year_month. If None, select all.
+    :param year_month: 
+    :param origin: list of airport codes 
+    :param destination: list of airport codes
+    :return: both lists of airport codes, filtered on existence of capacity
+    """
+    filtered_origin = set()
+    filtered_destination = set()
+    for o in origin:
+        for d in destination:
+            capa = CapacityInitialData.aggregate([
+                {'$match': {'origin': o, 'destination': d, 'year_month': year_month, 'active_rec': True}},
+                {'$group': {
+                    '_id': {'origin': '$origin', 'destination': '$destination'}, 'capa': {'$sum': '$capacity'}
+                }}
+            ])
+            cap = list(capa)
+            if cap == []:
+                continue
+            else:
+                filtered_destination.add(cap[0].get('_id').get('destination'))
+                filtered_origin.add(cap[0].get('_id').get('origin'))
+
+    if len(filtered_origin) > 0:
+        if len(filtered_destination) > 0:
+            return filtered_origin, filtered_destination
+        else:
+            return filtered_origin, None
+    else:
+        if len(filtered_destination) > 0:
+            return None, filtered_destination
+        else:
+            return origin, destination
+
+
+def find_airports_by_name(name, tab_name):
     """
     This function looks up the name of an airport or city in the Excel file based on the Mexico-specific
     field of "provider_query", or on "query_names".
     Failures of this function are reported at the end of the algorithm to enrich (manually) the "provider_query" with
     the help of submit_query_providers() function.
-    :param airport_name: an upper case string
+    :param name: an upper case string
     :param tab_name: name of the excel file's tab (indication of international or mexican-only airports)
     :return: airport code (or None)
     """
-    airport_clean = airport_name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
+    city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
     if 'NAC' in tab_name:
-        airport = Airport.find({provider_tag: airport_name.strip(), 'code_type': 'airport', 'country': 'MX'},
-                               {'_id': 0, 'code': 1, 'name': 1, 'city': 1}).first()
-        if airport is None:
-            airport = Airport.find({'query_names': airport_clean, 'code_type': 'airport', 'country': 'MX'},
-                                   {'_id': 0, 'code': 1, 'name': 1, 'segment_origins': 1, 'city': 1}).\
-                sort([{'segment_origins', -1}]).first()
+        airports = pd.DataFrame(list(Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'MX'},
+                                                  {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
+        if airports.empty:
+            airports = pd.DataFrame(list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'MX'},
+                                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
     else:
-        airport = Airport.find({provider_tag: airport_name.strip(), 'code_type': 'airport'},
-                               {'_id': 0, 'code': 1, 'name': 1, 'city': 1}).first()
-        if airport is None:
-            airport = Airport.find({'query_names': airport_clean, 'code_type': 'airport'},
-                                   {'_id': 0, 'code': 1, 'name': 1, 'segment_origins': 1, 'city': 1}).\
-                sort([{'segment_origins', -1}]).first()
-    return airport.code if airport else None
+        airports = pd.DataFrame(list(Airport.find({'query_names': city_clean, 'code_type': 'airport'},
+                                                  {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
+        if airports.empty:
+            airports = pd.DataFrame(list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
+                                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
+    return set(airports['code']) if not airports.empty else None
+
+
+def update_unknown_airports(city, pax):
+    global unknown_airports
+    if city in unknown_airports['city_name'].values:
+        unknown_airports.loc[unknown_airports['city_name'] == city, 'passengers'] += pax
+    # If airport is identified for the first time, save it in the dataframe
+    else:
+        info = pd.Series({'city_name': city, 'passengers': pax})
+        unknown_airports = unknown_airports.append(info, ignore_index=True)
 
 
 def format_file(xls):
@@ -147,23 +215,26 @@ def format_file(xls):
     return xls
 
 
-# def submit_query_providers():
-#     """
-#     Save new query names identified from previous data save failures to improve future imports
-#     """
-#     print('Saving new airports codes...')
-#     airport_replacement = {'SJO': 'SAN JOSE, COSTA RICA', 'VLN': 'VALENCIA, VENEZUELA', 'SJC': 'SAN JOSE, CALIFORNIA',
-#                            'LIR': 'LIBERIA', 'YYJ': 'VICTORIA, COLUMBIA',
-#                            'DAV': 'PANAMA', 'CDG': 'PARIS, CHARLES DE GAULLE', 'HKG': 'HONG KONG , Chek Lap Kok',
-#                            'DWC': 'Jabel Ali, Emirates Arabes Unidos', 'ZAZ': 'ZARAGOZA, ESPANA',
-#                            'GOT': 'GOTEMBURGO,SUECIA', 'PCA': 'PORTAGE CREEK', 'SJD': "ST. JHON'S", 'NKG': 'NANJING, JIANGSU'}
-#     with Airport.unordered_bulk() as bulk:
-#         for airport in airport_replacement:
-#             name = airport_replacement.get(airport)
-#             log.info('airport: %s', airport)
-#             bulk.find(dict(code=airport, code_type='airport')).upsert().update_one(
-#                 {'$addToSet': {provider_tag: name}})
-#     log.info('load_airports_names: %r', bulk.nresult)
+def submit_query_providers():
+    """
+    Save new query names identified from previous run's failures to improve future imports
+    """
+    print('Saving new airports codes...')
+    airport_replacement = {'MSY': 'NUEVA ORLEANS', 'JFK': 'NUEVA YORK', 'NYP': 'NUEVA YORK',
+                           'LGA': 'NUEVA YORK', 'FLU': 'NUEVA YORK',
+                           'EWR': 'NUEVA YORK', 'WAW': 'VARSOVIA', 'WMI': 'VARSOVIA',
+                           'SJD': 'SAN JOSE DEL CABO', 'HAV': 'LA HABANA',
+                           'PTY': 'PANAMA', 'PCA': 'PORTAGE CREEK', 'SCL': "SANTIAGO DE CHILE", 'STI': 'SANTIAGO DE CHILE',
+                           'SCU': 'SANTIAGO DE CHILE', 'LHR': 'LONDRES', 'LCY': 'LONDRES', 'LGW': 'LONDRES',
+                           'LGW': 'LONDRES', 'STN': 'LONDRES', 'YXU': 'LONDRES', 'BQH': 'LONDRES', 'BZE': 'BELICE',
+                           'SMP': 'ESTOCOLMO', 'VST': 'ESTOCOLMO', 'NYO': 'ESTOCOLMO', 'ARN': 'ESTOCOLMO', 'BMA': 'ESTOCOLMO'}
+    with Airport.unordered_bulk() as bulk:
+        for airport in airport_replacement:
+            name = airport_replacement.get(airport)
+            log.info('airport: %s', airport)
+            bulk.find(dict(code=airport, code_type='airport')).upsert().update_one(
+                {'$addToSet': {provider_tag: name}})
+    log.info('load_airports_names: %r', bulk.nresult)
 
 
 def get_data(xlsx_files):
@@ -187,8 +258,9 @@ def get_data(xlsx_files):
         previous_data = pd.DataFrame(columns=['origin', 'destination', 'year_month', 'passengers'])
 
         for tab in xl.sheet_names:  # loop in all sheets of the excel file
+            print('Starting', tab, 'tab in the Excel file')
             xls = xl.parse(tab)
-            year = xls.iloc[0, 2].split('/')[1].split(',')[1].strip()    # Look for the year in cell C3
+            year = int(filter(str.isdigit, xlsx_f)) # Use the renamed file for the year
             header = np.where(xls.loc[:, :] == "PAR DE CIUDADES / CITY PAIR")[0] + 3  # Look for line with column names
             xls = xl.parse(tab, header=header)   # Re-load file with headers
             xls = format_file(xls)
@@ -205,23 +277,36 @@ def get_data(xlsx_files):
                         break
                     origin = unidecode(full_row['Origin']).upper()
                     destination = unidecode(full_row['Destination']).upper()
-                    airport_origin = find_airport_by_name(origin, tab)
-                    airport_destination = find_airport_by_name(destination, tab)
+                    airport_origin = find_airports_by_name(origin, tab)
+                    airport_destination = find_airports_by_name(destination, tab)
                     if airport_origin is None:
-                        unknown_airports.add(origin)
+                        update_unknown_airports(origin, full_row['Total'])
                         continue
                     if airport_destination is None:
-                        unknown_airports.add(destination)
+                        update_unknown_airports(destination, full_row['Total'])
                         continue
 
                     for col in range(2, len(xls.columns)-1):   # loop through rows (except for Origin, Dest, and Total)
                         # skip cells with no pax
                         if np.isnan(full_row[col]) or full_row[col] == "" or int(full_row[col]) == 0:
                             continue
-
+                        year_month = str(year) + "-" + months.get(xls.columns[col])
                         total_pax = int(full_row[col])
 
-                        year_month = year + "-" + months.get(xls.columns[col])
+                        # Only treat the requested year_months
+                        if year_month not in year_months:
+                            continue
+
+                        if year_month not in previous_data['year_month'].values:
+                            if External_Segment_Tmp.find_one({'year_month': year_month, 'provider': provider}):
+                                log.warning("This year_month (%s) already exists for provider %s", year_month, provider)
+
+                        # For international flights, only keep the airports for which capacity exists on that year_month
+                        if 'INT' in tab:
+                            airport_origin, airport_destination = get_capa(year_month, airport_origin, airport_destination)
+                            if airport_destination is None or airport_origin is None:
+                                no_capa.append({'year_month': year_month, 'origin': origin, 'destination': destination})
+                                continue
 
                         if ((previous_data['origin'] == airport_origin) &
                                 (previous_data['destination'] == airport_destination) &
@@ -237,12 +322,14 @@ def get_data(xlsx_files):
 
                         dic = dict(provider=provider,
                                    data_type='airport',
-                                   airline=None,
-                                   origin=airport_origin,
-                                   destination=airport_destination,
-                                   year_month=year_month,
+                                   airline=['*'],
+                                   airline_ref_code=['*'],
+                                   origin=[', '.join(airport_origin)],
+                                   destination=[', '.join(airport_destination)],
+                                   year_month=[year_month],
                                    total_pax=total_pax,
-                                   raw_rec=full_row.to_json(),
+                                   overlap=[],
+                                   raw_rec=dict(full_row),
                                    both_ways=False,
                                    from_line=row,
                                    from_filename=xlsx_f,
@@ -266,18 +353,39 @@ def get_data(xlsx_files):
             log.info('stored: %r', bulk.nresult)
 
 
-def main():
-    log.info('Starting to get data')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Load data from Mexico')
+    parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
+
+    p = parser.parse_args()
+
+    logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    logging.basicConfig(level=logging.INFO, format=logging_format)
+
+    handler = BackupFileHandler(filename='load_Mexico.log', mode='w', backupCount=5)
+    formatter = logging.Formatter(logging_format)
+    handler.setFormatter(formatter)
+
+    main_log = logging.getLogger()  # le root handler
+    main_log.addHandler(handler)
+
+    log = logging.getLogger('load_Mexico')
+
+    log.info("Starting to update db with new file contents from Mexico's government website - version %s - %r",
+             __version__, p)
+
     start_time = time.time()
     open_db()
+    year_months = p.year_months
+    year = list(set([ym[0:4] for ym in p.year_months]))
     # submit_query_providers()   # update "provider_query" tags with previously unidentified airports
-    # xlsx_files = download_files()
-    xlsx_files = os.listdir(tmp_dir)
+    xlsx_files = download_files(year)
+    # xlsx_files = os.listdir(tmp_dir)
     get_data(xlsx_files)
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(xlsx_files)))
-    if len(unknown_airports) > 0:
-        print("\n", len(unknown_airports), "unknown airports (check the reasons why): ", unknown_airports)
+    log.info('%d unknown airports', len(unknown_airports))
+    if len(unknown_airports.index) > 0:
+        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
+    if len(no_capa) > 0:
+        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), no_capa)
     log.info('End')
-
-if __name__ == '__main__':
-    main()
