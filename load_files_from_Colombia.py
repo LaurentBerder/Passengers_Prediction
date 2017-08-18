@@ -118,9 +118,9 @@ def get_airline_by_icao(airline_icao, airline_name, pax):
 
 def download_files(year):
     log.info('Getting files on the web')
+    xlsx_files = []
     for y in year:
-        download_file(y)
-    xlsx_files = os.listdir(tmp_dir)
+        xlsx_files.append(download_file(y))
     return xlsx_files
 
 
@@ -131,27 +131,28 @@ def download_file(year):
     :return:
     """
     end_name = "Colombia-%s.xlsx" % (year)
-    u = urlopen(full_url)
-    try:
-        html = u.read().decode('utf-8')
-    finally:
-        u.close()
+    if end_name not in os.listdir(tmp_dir):
+        u = urlopen(full_url)
+        try:
+            html = u.read().decode('utf-8')
+        finally:
+            u.close()
 
-    soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
 
-    if not os.path.isdir(tmp_dir):
-        os.mkdir(tmp_dir)
+        if not os.path.isdir(tmp_dir):
+            os.mkdir(tmp_dir)
 
-    # Download the href element linking to an Excel document containing the correct year and the words "Origen - Destino"
-    # Stop as soon as one file has been downloaded
-    for link in soup.select('a[href^="http://"]'):
-        if "Destino" in link.get('href') and int(re.findall('\d+', link.get('href'))[0]) == year:
-            href = link.get('href')
-            filename = tmp_dir + "/" + href.rsplit('/', 1)[-1]
-            urlretrieve(href, tmp_dir + "/" + end_name)
-            log.info("%s downloaded", end_name)
-            break
-
+        # Download the href element linking to an Excel document containing the correct year and the words "Origen - Destino"
+        # Stop as soon as one file has been downloaded
+        for link in soup.select('a[href^="http://"]'):
+            if "Destino" in link.get('href') and int(re.findall('\d+', link.get('href'))[0]) == year:
+                href = link.get('href')
+                filename = tmp_dir + "/" + href.rsplit('/', 1)[-1]
+                urlretrieve(href, tmp_dir + "/" + end_name)
+                log.info("%s downloaded", end_name)
+                break
+    return end_name
 
 def format_columns(xls):
     """

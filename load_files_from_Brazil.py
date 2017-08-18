@@ -118,9 +118,10 @@ def download_files(year):
     :return: list of csv files
     """
     log.info('Getting files on the web')
+    xlsx_files = []
     for y in year:
-        download_single_file(y)
-    return os.listdir(tmp_dir)
+        xlsx_files.append(download_single_file(y))
+    return xlsx_files
 
 
 def download_single_file(year):
@@ -129,35 +130,38 @@ def download_single_file(year):
     The file is downloaded to 'tmp_dir' directory, then converted to csv format from the existing xlsb
     :param year: an integer
     """
-    response = urllib2.urlopen(full_url)
-    page = response.read()
+    end_name = 'Brazil_%s.xlsx' % year
+    if not end_name in os.listdir(tmp_dir):
+        response = urllib2.urlopen(full_url)
+        page = response.read()
 
-    # get all files' download urls
-    soup = BeautifulSoup(page, 'html.parser')
-    files_urls = [href for href in [a.get('href') for a in soup.find_all('a')] if href and href.find('xlsb') >= 0]
+        # get all files' download urls
+        soup = BeautifulSoup(page, 'html.parser')
+        files_urls = [href for href in [a.get('href') for a in soup.find_all('a')] if href and href.find('xlsb') >= 0]
 
-    base, _ = os.path.split(files_urls[0])
-    files_urls = [url for url in files_urls if url.find(base) == 0 >= 0]
+        base, _ = os.path.split(files_urls[0])
+        files_urls = [url for url in files_urls if url.find(base) == 0 >= 0]
 
-    if not files_urls:
-        log.warning('Cannot find any file')
+        if not files_urls:
+            log.warning('Cannot find any file')
 
-    if not os.path.isdir(tmp_dir):
-        os.mkdir(tmp_dir)
+        if not os.path.isdir(tmp_dir):
+            os.mkdir(tmp_dir)
 
-    # Out of all the files available on the website, identify the correct year
-    url = [x for x in files_urls if str(year) in x][0]
+        # Out of all the files available on the website, identify the correct year
+        url = [x for x in files_urls if str(year) in x][0]
 
-    # download all xlsb files
-    f_in = urllib2.urlopen('%s' % url)
-    _, filename = os.path.split(url)
-    with open(os.path.join(tmp_dir, filename), 'wb') as f_out:
-        f_out.write(f_in.read())
-    os.system("export HOME=/tmp && libreoffice --headless --convert-to csv"
-              " %s/%s --outdir %s --infilter=CSV:44,34,UTF8"
-              % (tmp_dir, filename, tmp_dir))  # convert from xlsb to csv format with UTF-8 encoding
-    os.system("rm -f %s/%s" % (tmp_dir, filename))  # delete original xlsb files
-    log.info('File %s downloaded and converted', filename)
+        # download all xlsb files
+        f_in = urllib2.urlopen('%s' % url)
+        _, filename = os.path.split(url)
+        with open(os.path.join(tmp_dir, filename), 'wb') as f_out:
+            f_out.write(f_in.read())
+        os.system("export HOME=/tmp && libreoffice --headless --convert-to csv"
+                  " %s/%s --outdir %s --infilter=CSV:44,34,UTF8"
+                  % (tmp_dir, filename, tmp_dir))  # convert from xlsb to csv format with UTF-8 encoding
+        os.system("rm -f %s/%s" % (tmp_dir, filename))  # delete original xlsb files
+        log.info('File %s downloaded and converted', filename)
+    return end_name
 
 
 def get_data(csv_files):

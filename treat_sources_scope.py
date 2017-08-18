@@ -18,6 +18,7 @@ import argparse
 import logging
 import logging.handlers
 import os
+import pandas as pd
 import sys
 sys.path.append('../')
 from optidb.model import *
@@ -91,8 +92,8 @@ def identify_overlaps(year_month, providers):
 
             if query_od:
                 query_od_return = dict((k, {'$in': source[r] + ['*']})
-                         for k, r in (('origin', 'destination'), ('destination', 'origin'))
-                         if source[r][0] != '*')
+                                       for k, r in (('origin', 'destination'), ('destination', 'origin'))
+                                       if source[r][0] != '*')
                 if not source.both_ways:
                     query_od_return['both_ways'] = True
 
@@ -177,7 +178,7 @@ def calculate_ratios():
             else:
                 ratio['pax_ratio'] = unique['total_pax'] / sum_pax[0].get('pax')
                 if not unique.get('revenue') or unique.get('revenue') == 0:
-                    ratio['pax_rev'] = None
+                    ratio['rev_ratio'] = None
                 else:
                     ratio['rev_ratio'] = unique['revenue'] / sum_pax[0].get('revenue')
 
@@ -320,7 +321,7 @@ def save_new_segments(providers, not_placed):
     :return:
     """
     uniques_cursor = External_Segment_Tmp.find({'year_month': year_month,
-                                                'overlap': {'$in'[None, []]},
+                                                'overlap': {'$in': [None, []]},
                                                 'provider': {'$in': providers}})
     pct_uniques = uniques_cursor.count() / 100
 
@@ -331,9 +332,10 @@ def save_new_segments(providers, not_placed):
 
         def process_unique(unique):
             log.info('origin: %r, destination: %r, airline: %r, passengers: %d, pax_ratio:%s',
-                     unique.origin, unique.destination, unique.airline, unique.total_pax, unique.get('ratio', {}).get('pax_ratio'))
+                     unique.origin, unique.destination, unique.airline, unique.total_pax,
+                     unique.get('ratio', {}).get('pax_ratio'))
             # If we've been able to calculate a ratio between new pax count and existing pax count, update data
-            # Otherwise, create new segment if data is enough, or store line to see what went wrong.
+            # Otherwise, create new segment if data is enough, or store line to see what went wrong at the end of program.
             if unique.get('ratio', {}).get('pax_ratio'):
                 spread_mass_update(unique, bulk)
             else:
@@ -341,7 +343,7 @@ def save_new_segments(providers, not_placed):
 
         for i, unique in enumerate(uniques_cursor, 1):
             if i % 1000 == 0:
-                log.info('** %s%% **', '{0:.1g}'.format(i / pct_uniques))
+                log.info('** %.1f%% **', i / pct_uniques)
             pool.add_task(process_unique, unique)
 
     log.info('end store NewSegments: %r', bulk.nresult)
@@ -387,22 +389,22 @@ if __name__ == '__main__':
         # Phase 2 - Calculate ratios, then save in external_segment
         calculate_ratios()
 
-    # # Phase 3 - Spread mass, then save new passenger counts and revenues in new_segments_initial_data
-    # not_placed = []
-    # log.info("Identifying routes corresponding to non-overlapping data, saving in database")
-    # save_new_segments(providers, not_placed)
-    #
-    # # Reste à traiter les chevauchements
-    #
-    # log.info("\n\n--- %s seconds to compile data from %d sources ---", time.time() - start_time,
-    #          len(External_Segment_Tmp.find({'year_month': year_month}).distinct('provider')))
-    #
-    # if len(not_placed) > 0:
-    #     log.warning("These %d data were not placed, because of lack of atomicity, and no linked segment nor capacity:",
-    #                 len(not_placed))
-    #     not_placed = pd.DataFrame.from_records(not_placed)
-    #     col_to_keep = ['_id', 'origin', 'destination', 'year_month', 'airline',
-    #                    'airline_ref_code', 'provider', 'from_filename']
-    #     not_placed = not_placed[col_to_keep]
-    #     log.warning(not_placed)
+    # Phase 3 - Spread mass, then save new passenger counts and revenues in new_segments_initial_data
+    not_placed = []
+    log.info("Identifying routes corresponding to non-overlapping data, saving in database")
+    save_new_segments(providers, not_placed)
+
+    # Reste à traiter les chevauchements
+
+    log.info("\n\n--- %s seconds to compile data from %d sources ---", time.time() - start_time,
+             len(External_Segment_Tmp.find({'year_month': year_month}).distinct('provider')))
+
+    if len(not_placed) > 0:
+        log.warning("These %d data were not placed, because of lack of atomicity, and no linked segment nor capacity:",
+                    len(not_placed))
+        not_placed = pd.DataFrame.from_records(not_placed)
+        col_to_keep = ['_id', 'origin', 'destination', 'year_month', 'airline',
+                       'airline_ref_code', 'provider', 'from_filename']
+        not_placed = not_placed[col_to_keep]
+        log.warning(not_placed)
     log.info('End')

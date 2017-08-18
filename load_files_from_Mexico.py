@@ -107,7 +107,6 @@ def download_files(year):
     xlsx_files = []
     for y in year:
         xlsx_files.append(download_single_file(y))
-    xlsx_files = os.listdir(tmp_dir)
     return xlsx_files
 
 
