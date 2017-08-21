@@ -102,6 +102,7 @@ def get_data():
     def log_bulk(self):
         log.info('  store external_segment: %r', self.nresult)
 
+    now = utcnow()
     provider = "CRK"
     tmp_dir = "/home/laurent"
     xlsx_f = "CRK.xlsx"
@@ -155,7 +156,6 @@ def get_data():
                            both_ways=True,
                            from_line=row_nb,
                            from_filename=xlsx_f)
-                now = utcnow()
                 query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                       'data_type', 'airline'))
                 bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

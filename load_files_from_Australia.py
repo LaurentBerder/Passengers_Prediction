@@ -332,6 +332,7 @@ def get_data(xlsx_files):
     :return:
     """
     global provider, unknown_airports
+    now = utcnow()
     airport_replacement = {}
     airport_exclusions = {}
 
@@ -406,7 +407,6 @@ def get_data(xlsx_files):
                             (previous_data['destination'] == airport_destination) &
                             (previous_data['year_month'] == year_month)] = passengers  # Modify previous_data's pax
 
-                    now = utcnow()
                     query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                        'data_type', 'airline'))
                     bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})
@@ -456,7 +456,6 @@ def get_data(xlsx_files):
                                year_month=[row['year_month']],
                                raw_rec=dict(row), both_ways=False,
                                from_line=row_index, from_filename=xlsx_f, url=domestic_url)
-                        now = utcnow()
                         query = dict((k, dic_in[k]) for k in ('origin', 'destination', 'year_month', 'provider', 'data_type'))
                         bulk.find(query).upsert().update_one({'$set': dic_in, '$setOnInsert': dict(inserted=now)})
 
@@ -471,7 +470,6 @@ def get_data(xlsx_files):
                                   year_month=[row['year_month']],
                                   raw_rec=dict(row), both_ways=False,
                                   from_line=row_index, from_filename=xlsx_f, url=domestic_url)
-                        now = utcnow()
                         query = dict((k, dic_out[k]) for k in ('origin', 'destination', 'year_month', 'provider', 'data_type'))
                         bulk.find(query).upsert().update_one({'$set': dic_out, '$setOnInsert': dict(inserted=now)})
         log.info('stored: %r', bulk.nresult)

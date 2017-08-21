@@ -198,6 +198,7 @@ def get_data(csv_files):
     """
     global unknown_airlines
     global airports_codes
+    now = utcnow()
     ref_code.init_cache()
     airports_codes = get_airports_codes()
     airline_codes = get_airline_codes()
@@ -311,7 +312,6 @@ def get_data(csv_files):
                                 (previous_data['airline'] == row_airline) &
                                 (previous_data['year_month'] == year_month)] = passengers  # Modify previous_data's pax
 
-                        now = utcnow()
                         query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                            'data_type', 'airline'))
                         bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

@@ -192,6 +192,7 @@ def get_data(xlsx_files):
     """
     global provider
     global airport_codes
+    now = utcnow()
     ref_code.init_all()
     airport_codes = get_airports_codes()
     airport_replacement = {"BUE": "EZE", "RIO": "GIG", "LMC": "LMC", "LMA": "MCJ", "VGP": "VGZ", "PTL": "PTX",
@@ -294,7 +295,6 @@ def get_data(xlsx_files):
                         (previous_data['airline_ref_code'] == airline_ref_code) &
                         (previous_data['year_month'] == year_month)] = total_pax
 
-                now = utcnow()
                 query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                    'data_type', 'airline'))
                 bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

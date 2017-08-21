@@ -170,6 +170,7 @@ def get_data(csv_files):
     :return:
     """
     global provider
+    now = utcnow()
     ref_code.init_cache()
     airport_replacement = {"SBCD": "SSCC", "SWUY": "SBUY", "SBJI": "SWJI", "RJNN": "RJNA", "SBPM": "SBPJ",
                            "SEQU": "SEQM", "SNQY": "SBJU", "SJDB": "SBDB", "SWJH": "SIZX", "SNNG": "SJNP",
@@ -278,7 +279,6 @@ def get_data(csv_files):
                                 (previous_data['ref_code'] == airline_ref_code) &
                                 (previous_data['year_month'] == year_month)] = total_pax  # Modify previous_data's pax
 
-                        now = utcnow()
                         query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                            'data_type', 'airline'))
                         bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

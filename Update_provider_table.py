@@ -54,10 +54,7 @@ def update(new_data):
 
 def main():
     open_db()
-    new_data = [{'provider': 'Mexico', 'index': {'ym_start': '2002-01', 'confidence': 20}},
-                {'provider': 'USA', 'index': {'ym_start': '2002-01', 'confidence': 38}},
-                {'provider': 'Brazil', 'index': {'ym_start': '2002-01', 'confidence': 43}},
-                {'provider': 'Colombia', 'index': {'ym_start': '2002-01', 'confidence': 49}},
-                {'provider': 'India', 'index': {'ym_start': '2015-04', 'confidence': 15}}]
+    new_data = [{'provider': 'Mexico', 'index': {'ym_start': '2002-01', 'confidence': 22}, 'import_process': True},
+                {'provider': 'USA', 'index': {'ym_start': '2002-01', 'confidence': 40}, 'import_process': True}]
     update(new_data)
 

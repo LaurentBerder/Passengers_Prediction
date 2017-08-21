@@ -77,6 +77,7 @@ def get_data():
     def log_bulk(self):
         log.info('  store external_segment: %r', self.nresult)
 
+    now = utcnow()
     tmp_dir = "/home/laurent"
     xlsx_f = "RUN.xlsx"
     print('******************** processing Excel file:', xlsx_f)
@@ -145,7 +146,6 @@ def get_data():
                                 both_ways=False,
                                 from_line=row,
                                 from_filename=xlsx_f)
-                now = utcnow()
                 query = dict((k, dic_from[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                         'data_type', 'airline'))
                 bulk.find(query).upsert().update_one({'$set': dic_from, '$setOnInsert': dict(inserted=now)})

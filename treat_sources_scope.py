@@ -102,7 +102,7 @@ def identify_overlaps(year_month, providers):
             update = {'$addToSet': dict(overlap=source._id)}
             result = External_Segment_Tmp.update(query, update, multi=True)
             end = utcnow()
-            log.info('Update %d (%ss) - %r', i, end-start, result)
+            log.info('Update overlaps %d (%ss) - %r', i, end-start, result)
 
         for i, source in enumerate(sources_cursor, 1):
             if i % 1000 == 0:
@@ -226,21 +226,29 @@ def spread_mass_update(unique, bulk):
     log.info('update')
     rev_ratio = unique.ratio.get('rev_ratio') or unique.ratio.get('pax_ratio')
 
-    for segment in External_Segment_Tmp.find(get_match(unique)):
-        new_pax = max(1, int(segment.passengers * unique.ratio['pax_ratio'] + .5))
-        print(segment)
-        new_rev = max(1, int(segment.get('segment_revenue_usd', 0) * rev_ratio + .5))
-        new_record = dict(passengers=new_pax, segment_revenue_usd=new_rev)
-        initial_record = dict((k, segment[k]) for k in new_record.keys())
+    print('Origin: %s, Destination: %s, Airline: %s, ratios: %r' %
+          (unique.origin, unique.destination, unique.airline, unique.ratio))
 
-        updated = dict(on=now,
-                       data_type='external_source',
-                       initial_record=initial_record,
-                       new_record=new_record,
-                       external_provider=unique['provider'])
-        with lock:
-            pass
-            bulk.find(segment.__id_dict__).update_one({'$set': new_record, '$push': dict(updated=updated)})
+    for segment in NewSegmentInitialData.find(get_match(unique)):
+        # Check that this specific update has not been applied already
+        # (based on the date of import from external source file)
+        if segment.get('updated') and unique['inserted'] in [d.get('data_date') for d in segment.get('updated')]:
+            continue
+        else:
+            new_pax = max(1, int(segment.passengers * unique.ratio['pax_ratio'] + .5))
+            new_rev = max(1, int(segment.get('segment_revenue_usd', 0) * rev_ratio + .5))
+            new_record = dict(passengers=new_pax, segment_revenue_usd=new_rev)
+            initial_record = dict((k, segment[k]) for k in new_record.keys())
+
+            updated = dict(on=now,
+                           data_date=unique['inserted'],
+                           data_type='updated_by_external_source',
+                           initial_record=initial_record,
+                           new_record=new_record,
+                           external_provider=unique['provider'])
+            with lock:
+                pass
+                bulk.find(segment.__id_dict__).update_one({'$set': new_record, '$push': dict(updated=updated)})
 
 
 def spread_mass_create(unique, bulk, not_placed):
@@ -279,19 +287,22 @@ def spread_mass_create(unique, bulk, not_placed):
         # Are there any capacity for this route? If so, spread mass according to capacity.
         # Otherwise, put the route aside for display at the end of the program
         capas = aggregate_capa(unique)
+        # If there are any capacity for this specific atomic data
         if capas:
-            sum_capas = sum(capa['capacity'] for capa in capas)
-            ratio_pax = unique.get('total_pax') / sum_capas
-            ratio_rev = unique.get('revenue') / sum_capas if unique.get('revenue') else None
-            for capa in capas:
-                pax = int(ratio_pax * capa['capacity'])
-                rev = int(ratio_rev * capa['capacity']) if ratio_rev else None
-                seg = new_seg(capa['origin'], capa['destination'], capa['operating_airline'],
-                              capa['operating_airline_ref_code'], capa['year_month'],
-                              pax, rev, unique.__id_dict__, unique['provider'], 'new_segment_from_external_source_by_capa')
-                with lock:
-                    pass
-                    bulk.insert(seg)
+            # And if this specific atomic data has not already been saved
+            if not NewSegmentInitialData.find(get_match(unique)):
+                sum_capas = sum(capa['capacity'] for capa in capas)
+                ratio_pax = unique.get('total_pax') / sum_capas
+                ratio_rev = unique.get('revenue') / sum_capas if unique.get('revenue') else None
+                for capa in capas:
+                    pax = int(ratio_pax * capa['capacity'])
+                    rev = int(ratio_rev * capa['capacity']) if ratio_rev else None
+                    seg = new_seg(capa['origin'], capa['destination'], capa['operating_airline'],
+                                  capa['operating_airline_ref_code'], capa['year_month'],
+                                  pax, rev, unique.__id_dict__, unique['provider'], 'new_segment_from_external_source_by_capa')
+                    with lock:
+                        pass
+                        bulk.insert(seg)
         else:
             with lock:
                 not_placed.append(unique)
@@ -307,7 +318,7 @@ def spread_mass_create(unique, bulk, not_placed):
 
         seg = new_seg(origin, destination, operating_airline, operating_airline_ref_code,
                       ym, pax, rev, unique.__id_dict__,
-                      unique['provider'],'new_segment_from_external_source_by_segments')
+                      unique['provider'], 'new_segment_from_external_source_by_segments')
         with lock:
             bulk.insert(seg)
 
@@ -349,14 +360,19 @@ def save_new_segments(providers, not_placed):
     log.info('end store NewSegments: %r', bulk.nresult)
 
 
-if __name__ == '__main__':
+def cmd_line():
     parser = argparse.ArgumentParser(description='Adjust segments based on external sources for a single year month')
     parser.add_argument('ym', type=YearMonth, help='YearMonth (YYYY-MM) to deal with')
     parser.add_argument('--first_step', dest='first_step', type=int, default=1, help='1: Start from overlaps detection,'
-                                                                                  '2: Start from ratios calculation,'
-                                                                                  '3: Only do the spreading')
-    parser.add_argument('--reset_overlap', dest='reset_overlap', action='store_true', help='If present, reset all overlaps')
-    p = parser.parse_args()
+                                                                                     '2: Start from ratios calculation,'
+                                                                                     '3: Only do the spreading')
+    parser.add_argument('--reset_overlap', dest='reset_overlap', action='store_true',
+                        help='If present, reset all overlaps')
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    p = cmd_line()
 
     logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=logging_format)

@@ -175,6 +175,7 @@ def update_routes(csv_file):
     """
     global aiports_codes
     airports_codes = get_airports_codes()
+    now = utcnow()
 
     def log_bulk(self):
         log.info('  store external_segment: %r', self.nresult)
@@ -218,7 +219,6 @@ def update_routes(csv_file):
                 if not check_airport(airport_destination, pax):
                     continue
 
-                now = utcnow()
                 dic = dict(provider=provider,
                            data_type='airport',
                            airline=['*'],

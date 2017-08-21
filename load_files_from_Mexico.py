@@ -244,6 +244,7 @@ def get_data(xlsx_files):
     :return:
     """
     global provider
+    now = utcnow()
     months = {"January": "01", "February": "02", "March": "03", "April": "04", "May": "05", "June": "06",
               "July": "07", "August": "08", "September": "09", "October": "10", "November": "11", "December": "12"}
 
@@ -345,7 +346,6 @@ def get_data(xlsx_files):
                                 (previous_data['destination'] == airport_destination) &
                                 (previous_data['year_month'] == year_month)] = total_pax
 
-                        now = utcnow()
                         query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                            'data_type', 'airline'))
                         bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

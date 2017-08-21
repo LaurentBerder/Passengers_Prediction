@@ -129,6 +129,8 @@ def populate_db(year, month):
     def log_bulk(self):
         log.info('  store external_segment: %r', self.nresult)
 
+    now = utcnow()
+
     # urls = ['http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?file=data/avia_par_be.tsv.gz']
     for url in urls:  # loop through each file
             print('******************** processed url:  ', url)
@@ -215,7 +217,6 @@ def populate_db(year, month):
                                    from_line=row_index,
                                    from_filename=file_name,
                                    url=url)
-                        now = utcnow()
                         query = dict((k, dic[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                            'data_type', 'airline'))
                         bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})

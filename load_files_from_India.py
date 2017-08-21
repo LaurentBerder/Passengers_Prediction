@@ -250,6 +250,7 @@ def get_data(xlsx_files):
     :return:
     """
     global provider
+    now = utcnow()
     months = {"January": "01", "February": "02", "March": "03", "April": "04", "May": "05", "June": "06",
               "July": "07", "August": "08", "September": "09", "October": "10", "November": "11", "December": "12",
               "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "Jun": "06", "Jul": "07", "Aug": "08", "Sep": "09",
@@ -325,7 +326,6 @@ def get_data(xlsx_files):
                               from_line=row,
                               from_filename=xlsx_f,
                               url=full_url)
-                now = utcnow()
                 query = dict((k, dic_to[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                       'data_type', 'airline'))
                 bulk.find(query).upsert().update_one({'$set': dic_to, '$setOnInsert': dict(inserted=now)})
@@ -345,7 +345,6 @@ def get_data(xlsx_files):
                                 from_line=row,
                                 from_filename=xlsx_f,
                                 url=full_url)
-                now = utcnow()
                 query = dict((k, dic_from[k]) for k in ('origin', 'destination', 'year_month', 'provider',
                                                         'data_type', 'airline'))
                 bulk.find(query).upsert().update_one({'$set': dic_from, '$setOnInsert': dict(inserted=now)})
