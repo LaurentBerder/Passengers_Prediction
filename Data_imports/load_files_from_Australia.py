@@ -13,6 +13,7 @@
 
 from __future__ import print_function
 import time
+import argparse
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
 import locale
@@ -145,7 +146,7 @@ def download_files(year, month):
         os.mkdir(tmp_dir)
     if not isinstance(month, tuple) and not isinstance(year, tuple):
         if External_Segment_Tmp.find_one(
-                {'year_month': str(year) + "-" + format(month, '02d'), 'provider': provider}):
+                {'year_month': str(year) + "-" + format(int(month), '02d'), 'provider': provider}):
             log.warning("This year_month (%s) already exists for provider %s",
                         str(year)+"-"+format(month, '02d'), provider)
     else:
@@ -324,7 +325,7 @@ def format_file(xlsx_f, perimeter):
     return xls
 
 
-def get_data(xlsx_files):
+def get_data(xlsx_files, year_months):
     """
     Populate the database with data extract in xlsx files. One file per year_month, only one tab per file.
     Back/Forth routes in rows, one column per way.
@@ -357,6 +358,8 @@ def get_data(xlsx_files):
             for row_index, row in xls.iterrows():  # loop through each row (origin, destination) in file
                 row_nb += 1
                 year_month = row['year_month']
+                if year_month not in year_months:
+                    continue
                 # First the process for domestic files
                 if perimeter == "domestic":
                     passengers = int(row['Passengers'])
@@ -476,6 +479,11 @@ def get_data(xlsx_files):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Load data from Brazil')
+    parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
+
+    p = parser.parse_args()
+
     logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=logging_format)
     handler = BackupFileHandler(filename='load_files_from_Australia.log', mode='w', backupCount=20)
@@ -488,14 +496,18 @@ if __name__ == '__main__':
 
     log.info('Starting to get data')
     start_time = time.time()
+
     Model.init_db(def_w=True)
-    year = input("Year(s) \n if multiple years, in parenthesis with commas in between")
-    month = input("Month number(s) \n if multiple months, in parenthesis with commas in between")
+
+    year_months = p.year_months[0].split(', ')
+    year = list(set([ym[0:4] for ym in p.year_months]))
+    month = list(set([ym[6:7] for ym in p.year_months]))
     # submit_query_providers()   # update "provider_query" tags with previously unidentified airports
     xlsx_files = download_files(year, month)
     # xlsx_files = os.listdir(tmp_dir)
     airports_codes = get_airports_codes()
-    get_data(xlsx_files)
+
+    get_data(xlsx_files, year_months)
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(xlsx_files)))
     global unknown_airports
     if len(unknown_airports.index) > 0:

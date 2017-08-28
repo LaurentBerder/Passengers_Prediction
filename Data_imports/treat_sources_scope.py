@@ -114,6 +114,71 @@ def identify_overlaps(year_month, providers):
     return
 
 
+def treat_overlaps(year_month, providers):
+    """
+    Loop over all the records marked as overlaps, compare record's providers and their confidence index,
+    and remove the 'overlap' mark on the records coming from the most trusted sources.
+    :param year_month: string (YYYY-MM)
+    :param providers: list
+    :return:
+    """
+    providers_confidence = dict((x['provider'], x['index']['confidence'])
+                                for x in Provider.find({'index.ym_start': {'$lte': year_month}}))
+    query = {'year_month': year_month, 'provider': {'$in': providers}, 'overlap': {'$ne': None}}
+    overlaps_dict = dict((x._id, x) for x in External_Segment_Tmp.find(query))
+
+    def log_bulk(self):
+        log.info('  treating overlaps: %r', self.nresult)
+
+    with External_Segment_Tmp.unordered_bulk(100, execute_callback=log_bulk) as bulk:
+
+        for record in overlaps_dict.values():
+            # Skip the lines that were already treated
+            if record['overlap'] is None:
+                continue
+            # If it's a one-for-one overlap, only keep the data from the higher indexed source
+            # (remove the 'overlap' from this record)
+            if len(record['overlap']) == 1:
+                # Get the confidence index of both providers to compare
+                other_provider = overlaps_dict.get(record['overlap'][0])['provider']
+                if providers_confidence.get(record['provider']) >=  providers_confidence.get(other_provider):
+                    # Delete the 'overlap' mention (effectively keeping this data for further integration)
+                    bulk.find({'_id': record['_id']}).update_one({'$unset': {'overlap': 1}})
+                    # Mark the other record to be skipped
+                    overlaps_dict.get(record['overlap'][0])['overlap'] = None
+                # else:
+                    # Delete the 'overlap' mention (effectively keeping this data for further integration) of the other record
+                    bulk.find({'_id': overlaps_dict.get(record['overlap'][0])['overlap']}).update_one({'$unset': {'overlap': 1}})
+
+            # For one-to-many overlaps, first check if the current one has a higher indexed source
+            else:
+                # Store in a list all the lines concerned by the overlap:
+                grouped_routes = [External_Segment_Tmp.find_one({'_id': n}) for n in record['overlap']]
+                grouped_routes.append(record)
+
+                # Look for the providers and determine which one has the highest confidence index
+                concerned_providers = [overlaps_dict.get(n)['provider'] for n in record['overlap']]
+                concerned_providers.append(record['provider'])
+                concerned_providers = set(concerned_providers)
+                indexes = [providers_confidence.get(n) for n in concerned_providers]
+
+                if not any(providers_confidence.get(record['provider']) < providers_confidence.get(x) for x in
+                           concerned_providers):
+                    # Delete the 'overlap' mention (effectively keeping this data for further integration)
+                    bulk.find({'_id': record['_id']}).update_one({'$unset': {'overlap': 1}})
+                    # Mark the other record to be skipped
+                    for ov in record['overlap']:
+                        overlaps_dict.get(ov)['overlap'] = None
+                else:
+                    # If the higher indexed source is the current one, then then remove 'overlap' from the others
+                    bulk.find({'_id': {'$in': record['overlap']}}).update_one({'$unset': {'overlap': 1}})
+                    # Mark the other records to be skipped
+                    for ov in record['overlap']:
+                        overlaps_dict.get(ov)['overlap'] = None
+                    continue
+    log.info('end treatment of overlaps: %r', bulk.nresult)
+
+
 def get_match(unique, for_segments=True, with_ref_code=False):
     """
     Determine query match for different cases in this program
@@ -226,9 +291,6 @@ def spread_mass_update(unique, bulk):
     log.info('update')
     rev_ratio = unique.ratio.get('rev_ratio') or unique.ratio.get('pax_ratio')
 
-    print('Origin: %s, Destination: %s, Airline: %s, ratios: %r' %
-          (unique.origin, unique.destination, unique.airline, unique.ratio))
-
     for segment in NewSegmentInitialData.find(get_match(unique)):
         # Check that this specific update has not been applied already
         # (based on the date of import from external source file)
@@ -290,7 +352,7 @@ def spread_mass_create(unique, bulk, not_placed):
         # If there are any capacity for this specific atomic data
         if capas:
             # And if this specific atomic data has not already been saved
-            if not NewSegmentInitialData.find(get_match(unique)):
+            if NewSegmentInitialData.find(get_match(unique)).count() != 0:
                 sum_capas = sum(capa['capacity'] for capa in capas)
                 ratio_pax = unique.get('total_pax') / sum_capas
                 ratio_rev = unique.get('revenue') / sum_capas if unique.get('revenue') else None
@@ -299,7 +361,8 @@ def spread_mass_create(unique, bulk, not_placed):
                     rev = int(ratio_rev * capa['capacity']) if ratio_rev else None
                     seg = new_seg(capa['origin'], capa['destination'], capa['operating_airline'],
                                   capa['operating_airline_ref_code'], capa['year_month'],
-                                  pax, rev, unique.__id_dict__, unique['provider'], 'new_segment_from_external_source_by_capa')
+                                  pax, rev, unique.__id_dict__, unique['provider'],
+                                  'new_segment_from_external_source_by_capa')
                     with lock:
                         pass
                         bulk.insert(seg)
@@ -382,7 +445,7 @@ if __name__ == '__main__':
     main_log = logging.getLogger()  # le root handler
     main_log.addHandler(handler)
     log = logging.getLogger('Treat_sources_scope')
-    log.info('Treating scope for external sources, version %s - %r',  __version__, p)
+    log.info('Treating external sources, version %s - %r',  __version__, p)
 
     start_time = time.time()
     Model.init_db(def_w=True)
@@ -400,6 +463,9 @@ if __name__ == '__main__':
         pct_overlap = External_Segment_Tmp.find({'year_month': year_month, 'provider': {'$in': providers},
                                                  'overlap': {'$nin': [None, []]}}).count() / nb_overall_lines * 100
         log.info("%3.2f%% of overlapping data over the %d lines treated", pct_overlap, nb_overall_lines)
+
+        treat_overlaps(year_month, providers)
+        log.info("Compared overlaps and only kept the most relevent records according to confidence index")
 
     if p.first_step <= 2:
         # Phase 2 - Calculate ratios, then save in external_segment

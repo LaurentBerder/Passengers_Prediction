@@ -345,9 +345,12 @@ if __name__ == '__main__':
     Model.init_db(def_w=True)
     years = list(set([ym[0:4] for ym in p.year_months]))
     months = list(set([ym[5:7] for ym in p.year_months]))
+
     csv_files = robot_download(months, years)
     # csv_files = os.listdir(tmp_dir)
+
     get_data(csv_files)
+
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(csv_files)))
     global wrong_airports
     global unknown_airlines

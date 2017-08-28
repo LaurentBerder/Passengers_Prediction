@@ -32,9 +32,10 @@ from utils.logging_utils import BackupFileHandler
 provider = 'Mexico'
 provider_tag = 'query_providers.%s' % provider
 __version__ = 'V1.0.0'
-unknown_airports = pd.DataFrame(columns=['city_name', 'passengers'])
 no_capa = list()
 tmp_dir = '/tmp/mexico'
+if not os.path.isdir(tmp_dir):
+     os.mkdir(tmp_dir)
 base_url = 'http://www.sct.gob.mx/'
 end_url = 'transporte-y-medicina-preventiva/aeronautica-civil/5-estadisticas/53-estadistica-operacional-de-aerolineas-traffic-statistics-by-airline/'
 
@@ -51,11 +52,6 @@ main_log = logging.getLogger()  # le root handler
 main_log.addHandler(handler)
 
 log = logging.getLogger('load_Mexico')
-
-
-def open_db():
-    #config['ming.url'] = 'mongodb://localhost/'     # connect to local database instead of Optimode
-    Model.init_db(def_w=True)
 
 
 class External_Segment(Model):
@@ -93,7 +89,7 @@ def download_single_file(year):
                 "//a[contains(text(), '%s') and contains(text(), 'destino')]" % year).click()
 
         time.sleep(10)  # Wait until file has finished downloading
-        # Identify latest downloaded excel file name, and rename to "India_international_quarter-year.xlsx"
+        # Identify latest downloaded excel file name, and rename to "Mexico-year.xlsx"
         xlsx_name = max([tmp_dir + "/" + f for f in os.listdir(tmp_dir)], key=os.path.getctime)
         os.rename(os.path.join(tmp_dir, xlsx_name), os.path.join(tmp_dir, end_name))
         log.info("%s downloaded", end_name)
@@ -156,22 +152,26 @@ def find_airports_by_name(name, tab_name):
     the help of submit_query_providers() function.
     :param name: an upper case string
     :param tab_name: name of the excel file's tab (indication of international or mexican-only airports)
-    :return: airport code (or None)
+    :return: set of airport codes (or None)
     """
     city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
     if 'NAC' in tab_name:
-        airports = pd.DataFrame(list(Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'MX'},
-                                                  {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
-        if airports.empty:
-            airports = pd.DataFrame(list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'MX'},
-                                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
+        airports = dict((i.code, i) for i in
+                        Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'MX'},
+                                     {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
+        if len(airports) == 0:
+            airports = dict((i.code, i) for i in
+                            Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'MX'},
+                                         {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
     else:
-        airports = pd.DataFrame(list(Airport.find({'query_names': city_clean, 'code_type': 'airport'},
-                                                  {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
-        if airports.empty:
-            airports = pd.DataFrame(list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
-                                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
-    return set(airports['code']) if not airports.empty else None
+        airports = dict((i.code, i) for i in
+                        Airport.find({'query_names': city_clean, 'code_type': 'airport'},
+                                     {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
+        if len(airports) == 0:
+            airports = dict((i.code, i) for i in
+                            Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
+                                         {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
+    return set([a for a in airports.iterkeys()]) if len(airports) > 0 else None
 
 
 def update_unknown_airports(city, pax):
@@ -236,7 +236,7 @@ def submit_query_providers():
     log.info('load_airports_names: %r', bulk.nresult)
 
 
-def get_data(xlsx_files):
+def get_data(xlsx_files, year_months):
     """
     Populate the database with data extract in xlsx files. 4 different tabs, for distinction of national/international
     and scheduled/charter flights. Routes in rows, months in columns.
@@ -374,13 +374,18 @@ if __name__ == '__main__':
              __version__, p)
 
     start_time = time.time()
-    open_db()
-    year_months = p.year_months
+
+    Model.init_db(def_w=True)
+
+    year_months = p.year_months[0].split(', ')
     year = list(set([ym[0:4] for ym in p.year_months]))
+    unknown_airports = pd.DataFrame(columns=['city_name', 'passengers'])
     # submit_query_providers()   # update "provider_query" tags with previously unidentified airports
     xlsx_files = download_files(year)
     # xlsx_files = os.listdir(tmp_dir)
-    get_data(xlsx_files)
+
+    get_data(xlsx_files, year_months)
+
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(xlsx_files)))
     log.info('%d unknown airports', len(unknown_airports))
     if len(unknown_airports.index) > 0:

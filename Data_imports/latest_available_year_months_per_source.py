@@ -3,6 +3,7 @@
 # -------------------------------------------------------------------------------
 # Name:        Optimode / treat_sources_scope
 # Purpose:     Look at all the external sources' websites and check for which year_month their latest available data is.
+#              Then download the available ones that were not already downloaded
 #
 # Author:      berder
 #
@@ -24,6 +25,7 @@ from selenium import webdriver
 import locale
 import pandas as pd
 from datetime import datetime
+from dateutil import rrule
 import re
 import sys
 sys.path.append('../')
@@ -58,7 +60,7 @@ def update_latest_available_dates(providers):
     if 'USA' in providers:
         # USA:
         provider = 'USA'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen("http://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=293").read()
             string = 'Latest Available Data: '
@@ -75,7 +77,7 @@ def update_latest_available_dates(providers):
     if 'Colombia' in providers:
         # Colombia:
         provider = 'Colombia'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen("http://www.aerocivil.gov.co/atencion/estadisticas-de-las-actividades-aeronauticas/Paginas/bases-de-datos.aspx").read()
             string = '.xlsx'
@@ -89,7 +91,7 @@ def update_latest_available_dates(providers):
     if 'Brazil' in providers:
         # Brazil:
         provider = 'Brazil'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen('http://www.anac.gov.br/assuntos/dados-e-estatisticas/dados-estatisticos/dados-estatisticos').read()
             string = 'Dados disponíveis até '
@@ -103,7 +105,7 @@ def update_latest_available_dates(providers):
     if 'Mexico' in providers:
         # Mexico:
         provider = 'Mexico'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen('http://www.sct.gob.mx/transporte-y-medicina-preventiva/aeronautica-civil/5-estadisticas/53-estadistica-operacional-de-aerolineas-traffic-statistics-by-airline/').read()
             string = '.xlsx'
@@ -117,7 +119,7 @@ def update_latest_available_dates(providers):
     if len([s for s in providers if 'Eurostat' in s]) != 0:
         # Eurostat:
         provider = 'Eurostat'
-        url_template = 'http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?xl_file=data/'
+        url_template = 'http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?sort=1&file=data%2F'
         base_filename_list = {'be': 'avia_par_be.tsv.gz', 'bg': 'avia_par_bg.tsv.gz', 'cz': 'avia_par_cz.tsv.gz',
                               'dk': 'avia_par_dk.tsv.gz', 'de': 'avia_par_de.tsv.gz', 'ee': 'avia_par_ee.tsv.gz',
                               'ie': 'avia_par_ie.tsv.gz', 'el': 'avia_par_el.tsv.gz', 'es': 'avia_par_es.tsv.gz',
@@ -131,7 +133,7 @@ def update_latest_available_dates(providers):
                               'ch': 'avia_par_ch.tsv.gz'}
         for filename in base_filename_list:
             provider_country = provider + '-' + filename
-            log.info('Finding latest available year_month for %s' % provider_country)
+            log.info('  ----- Finding latest available year_month for %s' % provider_country)
             df = pd.read_csv(url_template + base_filename_list.get(filename), compression='gzip', sep='\t', nrows=1)
             cols_to_keep = [x for x in df.columns if 'M' in x]
             max_year_month = max(cols_to_keep).strip().replace('M','-')
@@ -141,7 +143,7 @@ def update_latest_available_dates(providers):
     if 'Ireland' in providers:
         # Ireland:
         provider = 'Ireland'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen('http://www.cso.ie/px/pxeirestat/statire/SelectVarVal/Define.asp?Maintable=CTM01&PLanguage=0').read()
             months = BeautifulSoup(page, "lxml").find_all('select',{'name':'var4'}, 'value')
@@ -155,7 +157,7 @@ def update_latest_available_dates(providers):
     if 'UK' in providers:
         # UK:
         provider = 'UK'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         try:
             page = urllib.urlopen('https://www.caa.co.uk/Data-and-analysis/UK-aviation-market/Airports/Datasets/UK-Airport-data/').read()
             soup = BeautifulSoup(page, 'lxml')
@@ -175,7 +177,7 @@ def update_latest_available_dates(providers):
     if 'India - domestic' in providers:
         # India - domestic:
         provider = 'India - domestic'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         url = 'http://dgca.nic.in/pub/pub-ind.htm'
         # Set chrome options and reach the website
         options = webdriver.ChromeOptions()
@@ -199,7 +201,7 @@ def update_latest_available_dates(providers):
     if 'India - intl' in providers:
         # India - intl:
         provider = 'India - intl'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         url = 'http://dgca.nic.in/pub/pub-ind.htm'
         # Set chrome options and reach the website
         options = webdriver.ChromeOptions()
@@ -221,7 +223,7 @@ def update_latest_available_dates(providers):
     if 'Australia - domestic' in providers:
         # Australia - domestic:
         provider = 'Australia - domestic'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         base_url = 'https://bitre.gov.au/'
         try:
             page = urllib.urlopen(base_url + 'publications/ongoing/domestic_airline_activity-time_series.aspx').read()
@@ -240,7 +242,7 @@ def update_latest_available_dates(providers):
     if 'Australia - intl' in providers:
         # Australia - intl:
         provider = 'Australia - intl'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         base_url = 'https://bitre.gov.au/'
         try:
             page = urllib.urlopen(base_url + 'publications/ongoing/international_airline_activity-time_series.aspx').read()
@@ -258,7 +260,7 @@ def update_latest_available_dates(providers):
     if 'Chile' in providers:
         # Chile:
         provider = 'Chile'
-        log.info('Finding latest available year_month for %s' % provider)
+        log.info('  ----- Finding latest available year_month for %s' % provider)
         base_url = 'http://www.jac.gob.cl'
         string = 'Trafico-de-Par-de-ciudades-por-Operador'
         try:
@@ -292,10 +294,28 @@ def update_latest_available_dates(providers):
             log.exception('URL request failed for %s:', provider)
 
 
+def group_by_source(dataset, regroup_value):
+    """
+    Group providers of a similar source together, and return the global list of year_months to download from that source
+    :param dataset: dict
+    :param regroup_value: string
+    :return: dictionary
+    """
+    container = {}
+    for k in dataset:
+        # Identify the source (remove any '-' from the provider's name)
+        new_key = k.split('-')[0].strip()
+        if new_key in container.iterkeys():
+            container[new_key].extend(dataset[k][regroup_value])
+        else:
+            container[new_key] = dataset[k][regroup_value]
+    return container
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Updating "latest year_month" for each external data provider')
-    parser.add_argument('--to_process', type=bool, default=True,
-                        help='Restrict to the list of providers that are processed')
+    parser.add_argument('--check_all_providers', action='store_true',
+                        help='Avoid restriction to the list of providers that are processed (just invoke the parameter)')
 
     p = parser.parse_args()
 
@@ -310,11 +330,13 @@ if __name__ == '__main__':
     log.info('Updating "latest year_month" for each external data provider, version %s - %r', __version__, p)
 
     Model.init_db(def_w=True)
-    if p.to_process:
+    # Adapt the list of providers depending on the 'to_process' parameter
+    if not p.check_all_providers:
         providers = [prov.provider for prov in Provider.find({'import_process': True})]
     else:
         providers = [prov.provider for prov in Provider.find({})]
 
+    # Look for the latest available files on all the providers' websites
     update_latest_available_dates(providers)
 
     latest_available = list(Provider.find({'provider': {'$in': providers}}, {'_id': 0, 'provider': 1, 'latest_ym_available':1}))
@@ -325,11 +347,33 @@ if __name__ == '__main__':
                                                                     'latest_downloaded': {'$max': "$year_month"}}}
                                                         ]))
     log.info('\n\n\n')
+
+    # Log the difference between what is available and what has already been downloaded
+    to_download = {}
     for prov in latest_downloaded:
-        if [item for item in latest_available if item.get("provider") == prov['_id']][0].get('latest_ym_available') == prov['latest_downloaded']:
-            log.info('Provider: , OK (%s)' % (prov['_id', prov['latest_downloaded']]))
+        available = [item for item in latest_available if item.get("provider") == prov['_id']][0].get('latest_ym_available')
+        if available <= prov['latest_downloaded']:
+            log.info('Provider: %s, OK (%s)' % (prov['_id'], prov['latest_downloaded']))
         else:
-            log.info('Provider: %s, latest_downloaded: %s, latest_available: %s'
-                  % (prov['_id'], prov['latest_downloaded'], (item for item in latest_available if
-                                                              item["provider"] == prov['_id']).next()[
-                'latest_ym_available']))
+            yms_to_download = []
+            date_range = list(rrule.rrule(rrule.MONTHLY,
+                                          dtstart=datetime.strptime(prov['latest_downloaded'], "%Y-%m"),
+                                          until=datetime.strptime(available, "%Y-%m")))
+            for month in date_range[1: len(date_range)]:
+                yms_to_download.append(str(month.year) + '-' + format(month.month, '02d'))
+
+            to_download.update({prov['_id']: {'latest_downloaded': prov['latest_downloaded'],
+                                                   'latest_available': available, 'yms_to_download': yms_to_download}})
+
+            log.info('Provider: %s, latest_downloaded: %s, latest_available: %s   -----   (%d year_months to download)'
+                  % (prov['_id'], prov['latest_downloaded'], available, len(yms_to_download)))
+
+    # For all the providers, download the missing year_months
+    # Regroup the providers per source (Eurostat together, etc)
+    to_download = group_by_source(to_download, 'yms_to_download')
+    for provider, info in to_download.iteritems():
+        # Launch import script for the source
+        log.info("\n\n\n\nxxxxxxxxxxx        launching script \"python load_files_from_%s.py %r\"\n\n\n\n"
+                 % (provider, ', '.join(info)))
+        os.system("cd scripts\npython load_files_from_%s.py %r"
+                  % (provider, ', '.join(info)))

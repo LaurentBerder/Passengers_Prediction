@@ -14,7 +14,10 @@
 # -------------------------------------------------------------------------------
 
 from __future__ import print_function, division
+import os
 import sys
+import pandas as pd
+import numpy as np
 import time
 sys.path.append('../')
 import argparse
@@ -22,15 +25,15 @@ import logging
 from optidb.model import *
 from utils import utcnow, YearMonth
 from utils.logging_utils import BackupFileHandler
-import pandas as pd
-import numpy as np
 
 
 provider = 'Eurostat'
 provider_tag = 'query_providers.%s' % provider
 __version__ = 'V2.0.2'
 tmp_dir = '/tmp/Eurostat'
-url_template = 'http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?file=data/'
+if not os.path.isdir(tmp_dir):
+     os.mkdir(tmp_dir)
+url_template = 'http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?sort=1&file=data%2F'
 base_filename_list = ['avia_par_be.tsv.gz', 'avia_par_bg.tsv.gz', 'avia_par_cz.tsv.gz', 'avia_par_dk.tsv.gz',
                       'avia_par_de.tsv.gz', 'avia_par_ee.tsv.gz', 'avia_par_ie.tsv.gz', 'avia_par_el.tsv.gz',
                       'avia_par_es.tsv.gz', 'avia_par_fr.tsv.gz', 'avia_par_hr.tsv.gz', 'avia_par_it.tsv.gz',
@@ -106,6 +109,7 @@ def check_airport(airport, country, pax):
             country = 'GR'
         if country == 'UK':
             country = 'GB'
+        # French overseas territories are stored under their own code, so transpose them to FR
         if airports_codes.get(airport).get('country') in ['RE', 'MQ', 'GP', 'GF', 'BL', 'YT', 'MF']:
             airports_codes[airport]['country'] = 'FR'
         if not country == airports_codes.get(airport).get('country'):
@@ -121,7 +125,7 @@ def check_airport(airport, country, pax):
         return True
 
 
-def populate_db(year, month):
+def populate_db(year_months):
     """
     Populate the database with data extract in urls list
     :return:
@@ -133,7 +137,7 @@ def populate_db(year, month):
 
     # urls = ['http://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?file=data/avia_par_be.tsv.gz']
     for url in urls:  # loop through each file
-            print('******************** processed url:  ', url)
+            log.info('******************** processed file:  %s' % url.split(url_template)[1])
             file_name = url.split('/')[-1][:-3]
             provider_country = file_name.split('_')[2].split('.')[0]
             full_provider = provider + "-" + provider_country
@@ -167,12 +171,9 @@ def populate_db(year, month):
 
                         #convert key to year_month
                         newkey = (str(key).strip().split('M')[0] + '-' + str(key).strip().split('M')[1])
-                        year_month = newkey
-                        ym = YearMonth(year_month)
-                        # Restrict to the requested year_months
-                        if ym.year not in year:
-                            continue
-                        if ym.month not in month:
+                        ym = newkey
+                        # Restrict to the requested year_month(s)
+                        if str(ym) not in year_months:
                             continue
                         row[newkey] = row.pop(key)
 
@@ -210,7 +211,7 @@ def populate_db(year, month):
                                    destination=[destination],
                                    airline=['*'],
                                    airline_ref_code=['*'],
-                                   year_month=[year_month],
+                                   year_month=[ym],
                                    total_pax=total_pax,
                                    raw_rec=dict(raw_rec),
                                    both_ways=False,
@@ -225,8 +226,7 @@ def populate_db(year, month):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Load data from Eurostat')
-    parser.add_argument('year', type=int, nargs='+', help='Year(s) to download')
-    parser.add_argument('--month', type=int, nargs='+', default=[1,2,3,4,5,6,7,8,9,10,11,12] ,help='Month(s) to download')
+    parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
     p = parser.parse_args()
 
     logging_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -246,10 +246,11 @@ if __name__ == '__main__':
     wrong_airports = pd.DataFrame(columns=['code', 'Eurostat_country', 'Optimode_country', 'passengers', 'info_type'])
 
     Model.init_db(def_w=True)
-    year = p.year
-    month = p.month
+    year_months = p.year_months[0].split(', ')
     airports_codes = get_airports_codes()
-    populate_db(year, month)
+
+    populate_db(year_months)
+
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(urls)))
     if len(wrong_airports.index) > 0:
         wrong_airports = wrong_airports.sort_values('passengers', ascending=False)

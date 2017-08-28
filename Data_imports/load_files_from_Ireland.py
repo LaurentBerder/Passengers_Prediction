@@ -50,7 +50,10 @@ provider_tag = 'query_providers.%s' % provider
 tmp_dir = '/tmp/Ireland'
 url = 'http://www.cso.ie/px/pxeirestat/statire/SelectVarVal/Define.asp?Maintable=CTM01&PLanguage=0'
 unknown_airports = pd.DataFrame(columns=['code', 'pax'])
-airports_codes = dict()
+
+if not os.path.isdir(tmp_dir):
+     os.mkdir(tmp_dir)
+
 
 
 class External_Segment(Model):
@@ -122,9 +125,10 @@ def download_file(year_months):
         Select(driver.find_element_by_name('grouping4')).select_by_visible_text('Deselect all')
         select_year_months = Select(driver.find_element_by_name('var4'))
         for ym in year_months_IRE:
-            select_year_months.select_by_visible_text(ym)
+            select_year_months.select_by_value(ym)
         # Go to next page
         driver.find_element_by_name('Forward').click()
+        log.info('Waiting for download page to load...')
         time.sleep(120)
 
         # Edit the options to get the table with only codes instead of a mix of text with codes inside
@@ -134,6 +138,7 @@ def download_file(year_months):
         driver.find_element_by_name('run').click()
 
         # Wait for file to be downloaded
+        log.info('Waiting for file to be downloaded')
         time.sleep(30)
         driver.close()
 
@@ -156,7 +161,6 @@ def get_airports_codes():
 
 def check_airport(airport, pax):
     global unknown_airports
-    global airports_codes
     # Check the airport code exists in Mongo. If not, skip line
     if airport not in airports_codes:
         if airport in unknown_airports['code'].values:
@@ -169,12 +173,10 @@ def check_airport(airport, pax):
         return True
 
 
-def update_routes(csv_file):
+def update_routes(csv_file, year_months):
     """
     Save new records in External_Segment collection
     """
-    global aiports_codes
-    airports_codes = get_airports_codes()
     now = utcnow()
 
     def log_bulk(self):
@@ -186,7 +188,7 @@ def update_routes(csv_file):
     new_columns[0] = 'irish_airport'
     new_columns[1] = 'way'
     new_columns[2] = 'other_airport'
-    for i, col in enumerate(new_columns[4:len(new_columns)], 3):
+    for i, col in enumerate(new_columns[3:len(new_columns)], 3):
         new_columns[i] = col.replace('M', '-')
     xls.columns = new_columns
     xls = xls.replace(' ', np.nan)
@@ -205,6 +207,9 @@ def update_routes(csv_file):
             if sum(row[available_year_months]) == 0:
                 continue
             for ym in available_year_months:
+                # Skip the year_months that are not requested
+                if ym not in year_months:
+                    continue
                 pax = row[ym]
 
                 if way == 1:
@@ -240,7 +245,7 @@ def update_routes(csv_file):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Load data from Ireland')
-    parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
+    parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download (ex: YYYY-MM YYYY-MM...)')
 
     p = parser.parse_args()
 
@@ -257,10 +262,16 @@ if __name__ == '__main__':
     log = logging.getLogger('load_Ireland')
 
     log.info('load_files_from_Ireland - version %s - %r', __version__, p)
-    year_months = p.year_months
+    year_months = p.year_months[0].split(', ')
+
     Model.init_db(def_w=True)
+
     csv_file = download_file(year_months)
-    update_routes(csv_file)
+    airports_codes = get_airports_codes()
+
+    update_routes(csv_file, year_months)
+
     if len(unknown_airports) > 0:
         log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
     log.info('End')
+

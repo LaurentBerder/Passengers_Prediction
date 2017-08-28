@@ -30,11 +30,9 @@ import determine_airline_ref_code as ref_code
 
 provider = 'Brazil'
 __version__ = 'V1.0.0'
-AIRPORTS_CODES = dict()
-AIRLINES_BY_ICAO = dict()
-unknown_icao_codes = pd.DataFrame(columns=['code', 'name', 'passengers'])
-unknown_airline_codes = pd.DataFrame(columns=['code', 'name', 'passengers'])
 tmp_dir = '/tmp/brazil'
+if not os.path.isdir(tmp_dir):
+     os.mkdir(tmp_dir)
 full_url = 'http://www.anac.gov.br/assuntos/dados-e-estatisticas/dados-estatisticos/dados-estatisticos'
 
 
@@ -130,8 +128,8 @@ def download_single_file(year):
     The file is downloaded to 'tmp_dir' directory, then converted to csv format from the existing xlsb
     :param year: an integer
     """
-    end_name = 'Brazil_%s.xlsx' % year
-    if not end_name in os.listdir(tmp_dir):
+    end_name = 'Brazil_%s.csv' % year
+    if end_name not in os.listdir(tmp_dir):
         response = urllib2.urlopen(full_url)
         page = response.read()
 
@@ -145,9 +143,6 @@ def download_single_file(year):
         if not files_urls:
             log.warning('Cannot find any file')
 
-        if not os.path.isdir(tmp_dir):
-            os.mkdir(tmp_dir)
-
         # Out of all the files available on the website, identify the correct year
         url = [x for x in files_urls if str(year) in x][0]
 
@@ -160,16 +155,17 @@ def download_single_file(year):
                   " %s/%s --outdir %s --infilter=CSV:44,34,UTF8"
                   % (tmp_dir, filename, tmp_dir))  # convert from xlsb to csv format with UTF-8 encoding
         os.system("rm -f %s/%s" % (tmp_dir, filename))  # delete original xlsb files
-        log.info('File %s downloaded and converted', filename)
+        csv_name = max([tmp_dir + "/" + f for f in os.listdir(tmp_dir)], key=os.path.getctime)
+        os.rename(os.path.join(tmp_dir, csv_name), os.path.join(tmp_dir, end_name))
+        log.info('File %s downloaded and converted', end_name)
     return end_name
 
 
-def get_data(csv_files):
+def get_data(csv_files, year_months):
     """
     Populate the database with data extract in csv files
     :return:
     """
-    global provider
     now = utcnow()
     ref_code.init_cache()
     airport_replacement = {"SBCD": "SSCC", "SWUY": "SBUY", "SBJI": "SWJI", "RJNN": "RJNA", "SBPM": "SBPJ",
@@ -226,6 +222,10 @@ def get_data(csv_files):
                             airport_destination = airport_replacement.get(airport_destination)
 
                         year_month = '%04d-%02d' % (int(row['ANO']), int(row['MÊS']))
+                        # Only treat the requested year_months
+                        if year_month not in year_months:
+                            continue
+
                         if year_month not in previous_data['year_month'].values:
                             if External_Segment_Tmp.find_one({'year_month': year_month, 'provider': provider}):
                                 log.warning("This year_month (%s) already exists for provider %s", year_month, provider)
@@ -310,17 +310,19 @@ if __name__ == '__main__':
 
     start_time = time.time()
     Model.init_db(def_w=True)
+    year_months = p.year_months[0].split(', ')
     year = list(set([ym[0:4] for ym in p.year_months]))
     xslx_files = download_files(year)
     # xslx_files = os.listdir(tmp_dir)
 
-    global AIRPORTS_CODES
-    AIRPORTS_CODES.update(get_airports_codes())
-    AIRLINES_BY_ICAO.update(get_airline_codes())
+    AIRPORTS_CODES = get_airports_codes()
+    AIRLINES_BY_ICAO = get_airline_codes()
+    unknown_icao_codes = pd.DataFrame(columns=['code', 'name', 'passengers'])
+    unknown_airline_codes = pd.DataFrame(columns=['code', 'name', 'passengers'])
+
     get_data(xslx_files)
+
     log.info("\n\n--- %s seconds to populate db from ANAC-Brazil---", (time.time() - start_time))
-    global unknown_icao_codes
-    global unknown_airline_codes
     if len(unknown_icao_codes.index) > 0:
         unknown_icao_codes = unknown_icao_codes.sort_values('passengers', ascending=False)
         print("\n\n", len(unknown_icao_codes.index), "unknown airports (check the reasons why): \n", unknown_icao_codes)

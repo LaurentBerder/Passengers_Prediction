@@ -31,11 +31,9 @@ import re
 
 provider = 'Colombia'
 __version__ = 'V1.0.0'
-AIRPORTS_CODES = dict()
-AIRLINES_BY_ICAO = dict()
-unknown_airports = pd.DataFrame(columns=['code', 'city', 'file_country', 'Optimode_country', 'info_type', 'passengers'])
-unknown_airlines = pd.DataFrame(columns=['code', 'name', 'passengers'])
 tmp_dir = '/tmp/colombia'
+if not os.path.isdir(tmp_dir):
+    os.mkdir(tmp_dir)
 full_url = 'http://www.aerocivil.gov.co/atencion/estadisticas-de-las-actividades-aeronauticas/Paginas/bases-de-datos.aspx'
 
 
@@ -59,10 +57,8 @@ def get_airports_codes():
 
 
 def check_airport(airport, city, country, pax):
-    global unknown_airports
-    global airport_codes
-
     # Check the airport code exists in Mongo. If not, skip line
+    global unknown_airports
     if airport not in airport_codes:
         if airport in unknown_airports['code'].values:
             unknown_airports.loc[unknown_airports['code'] == airport, 'passengers'] += pax
@@ -72,16 +68,6 @@ def check_airport(airport, city, country, pax):
             unknown_airports = unknown_airports.append(info, ignore_index=True)
         return False
 
-    # Check that airports are in the same country as in the database
-    # (would require translating country names from spanish)
-    # if not country == airport_codes.get(airport).get('country'):
-    #     if airport in unknown_airports['code'].values:
-    #         unknown_airports.loc[unknown_airports['code'] == airport, 'passengers'] += pax
-    #     else:
-    #         info = pd.Series({'code': airport, 'city': city, 'file_country': country,
-    #                           'Optimode_country': airport_codes.get(airport).get('country'),
-    #                           'info_type': 'country', 'passengers': pax})
-    #         unknown_airports = unknown_airports.append(info, ignore_index=True)
     return True
 
 
@@ -140,13 +126,11 @@ def download_file(year):
 
         soup = BeautifulSoup(html, "html.parser")
 
-        if not os.path.isdir(tmp_dir):
-            os.mkdir(tmp_dir)
-
         # Download the href element linking to an Excel document containing the correct year and the words "Origen - Destino"
         # Stop as soon as one file has been downloaded
-        for link in soup.select('a[href^="http://"]'):
-            if "Destino" in link.get('href') and int(re.findall('\d+', link.get('href'))[0]) == year:
+
+        for link in soup.select('a[href^="http"]'):
+            if "destino" in link.get('href').lower() and year in link.get('href'):
                 href = link.get('href')
                 filename = tmp_dir + "/" + href.rsplit('/', 1)[-1]
                 urlretrieve(href, tmp_dir + "/" + end_name)
@@ -190,11 +174,8 @@ def get_data(xlsx_files):
     Populate the database with data extract in xlsx files
     :return:
     """
-    global provider
-    global airport_codes
     now = utcnow()
-    ref_code.init_all()
-    airport_codes = get_airports_codes()
+    ref_code.init_cache()
     airport_replacement = {"BUE": "EZE", "RIO": "GIG", "LMC": "LMC", "LMA": "MCJ", "VGP": "VGZ", "PTL": "PTX",
                            "MIL": "MXP", "LON": "LHR", "SAO": "CGH", "BSL": "BSL", "TRP": "TCD", "RLB": "LIR",
                            "NYC": "JFK", "GTK": "FRS", "AWH": "USH", "STO": "ARN", "WAS": "IAD", "BHZ": "PLU"}
@@ -219,8 +200,8 @@ def get_data(xlsx_files):
                     continue
 
                 year_month = full_row['Year_Month']
-                # Stop if year_month not in the requested list
-                if year_month not in p.year_months:
+                # Only treat the requested year_months
+                if year_month not in year_months:
                     continue
 
                 total_pax = int(full_row['Passengers'])
@@ -325,15 +306,22 @@ if __name__ == '__main__':
              __version__, p)
 
     start_time = time.time()
+
     Model.init_db(def_w=True)
+
+    year_months = p.year_months[0].split(', ')
     year = list(set([ym[0:4] for ym in p.year_months]))
+    unknown_airports = pd.DataFrame(columns=['code', 'city', 'file_country', 'Optimode_country', 'info_type', 'passengers'])
+    unknown_airlines = pd.DataFrame(columns=['code', 'name', 'passengers'])
+    AIRLINES_BY_ICAO = get_airline_codes()
+    airport_codes = get_airports_codes()
+
     xlsx_files = download_files(year)
     # xlsx_files = os.listdir(tmp_dir)
-    AIRLINES_BY_ICAO.update(get_airline_codes())
-    get_data(xlsx_files)
+
+    get_data(xlsx_files, year_months)
+
     log.info("\n\n--- %s seconds to populate db from Aeronautica Civil de Colombia---", (time.time() - start_time))
-    global unknown_airports
-    global unknown_airlines
     if len(unknown_airports.index) > 0:
         unknown_airports = unknown_airports.sort_values('passengers', ascending=False)
         log.warning("%s wrong or unknown airports (check the reasons why): \n%s", len(unknown_airports.index),
