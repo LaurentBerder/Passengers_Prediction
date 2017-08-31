@@ -287,6 +287,12 @@ def get_data(csv_files, year_months):
                 log.info('stored: %r', bulk.nresult)
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Load data from Brazil')
     parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
@@ -325,9 +331,9 @@ if __name__ == '__main__':
     log.info("\n\n--- %s seconds to populate db from ANAC-Brazil---", (time.time() - start_time))
     if len(unknown_icao_codes.index) > 0:
         unknown_icao_codes = unknown_icao_codes.sort_values('passengers', ascending=False)
-        print("\n\n", len(unknown_icao_codes.index), "unknown airports (check the reasons why): \n", unknown_icao_codes)
+        print("\n\n", len(unknown_icao_codes.index), "unknown airports (check the reasons why): \n", print_full(unknown_icao_codes))
     if len(unknown_airline_codes.index) > 0:
         unknown_airline_codes = unknown_airline_codes.sort_values('passengers', ascending=False)
         print("\n\n", len(unknown_airline_codes.index), "unknown airlines (check the reasons why): \n",
-              unknown_airline_codes)
+              print_full(unknown_airline_codes))
     log.info('End')

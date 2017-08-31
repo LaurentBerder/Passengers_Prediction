@@ -157,19 +157,19 @@ def find_airports_by_name(name, tab_name):
     city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
     if 'NAC' in tab_name:
         airports = dict((i.code, i) for i in
-                        Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'MX'},
+                        Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}, 'country': 'MX'},
                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
         if len(airports) == 0:
             airports = dict((i.code, i) for i in
-                            Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'MX'},
+                            Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}, 'country': 'MX'},
                                          {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
     else:
         airports = dict((i.code, i) for i in
-                        Airport.find({'query_names': city_clean, 'code_type': 'airport'},
+                        Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}},
                                      {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
         if len(airports) == 0:
             airports = dict((i.code, i) for i in
-                            Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
+                            Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}},
                                          {'_id': 0, 'code': 1, 'name': 1, 'city': 1}) if i.code)
     return set([a for a in airports.iterkeys()]) if len(airports) > 0 else None
 
@@ -264,34 +264,37 @@ def get_data(xlsx_files, year_months):
             header = np.where(xls.loc[:, :] == "PAR DE CIUDADES / CITY PAIR")[0] + 3  # Look for line with column names
             xls = xl.parse(tab, header=header)   # Re-load file with headers
             xls = format_file(xls)
+            xls['tab'] = tab
 
             with External_Segment_Tmp.unordered_bulk(1000, execute_callback=log_bulk) as bulk:
 
-                for row in range(0, len(xls)):  # loop through each row (origin, destination) in file
-                    full_row = xls.iloc[row]
+                for indx, row in xls.iterrows():  # loop through each row (origin, destination) in file
                     # Skip empty rows (no text in Origin column, or year Total = 0)
-                    if isinstance(full_row['Origin'], float) or full_row['Total'] == 0:
+                    if isinstance(row['Origin'], float) or row['Total'] == 0:
                         continue
                     # Stop at the end of the table (indicated by "T O T A L")
-                    if "".join(full_row['Origin'].split(" ")).upper() == "TOTAL":
+                    if "".join(row['Origin'].split(" ")).upper() == "TOTAL":
                         break
-                    origin = unidecode(full_row['Origin']).upper()
-                    destination = unidecode(full_row['Destination']).upper()
+                    origin = unidecode(row['Origin']).upper()
+                    destination = unidecode(row['Destination']).upper()
                     airport_origin = find_airports_by_name(origin, tab)
                     airport_destination = find_airports_by_name(destination, tab)
                     if airport_origin is None:
-                        update_unknown_airports(origin, full_row['Total'])
+                        update_unknown_airports(origin, row['Total'])
                         continue
                     if airport_destination is None:
-                        update_unknown_airports(destination, full_row['Total'])
+                        update_unknown_airports(destination, row['Total'])
                         continue
 
-                    for col in range(2, len(xls.columns)-1):   # loop through rows (except for Origin, Dest, and Total)
-                        # skip cells with no pax
-                        if np.isnan(full_row[col]) or full_row[col] == "" or int(full_row[col]) == 0:
+                    for colname, colvalue in row.iteritems():   # loop through rows
+                        # Only look at month columns
+                        if colname not in months.keys():
                             continue
-                        year_month = str(year) + "-" + months.get(xls.columns[col])
-                        total_pax = int(full_row[col])
+                        # skip cells with no pax
+                        if np.isnan(colvalue) or colvalue == "" or int(colvalue) == 0:
+                            continue
+                        year_month = str(year) + "-" + months.get(colname)
+                        total_pax = int(colvalue)
 
                         # Only treat the requested year_months
                         if year_month not in year_months:
@@ -328,10 +331,9 @@ def get_data(xlsx_files, year_months):
                                    destination=[', '.join(airport_destination)],
                                    year_month=[year_month],
                                    total_pax=total_pax,
-                                   overlap=[],
-                                   raw_rec=dict(full_row),
+                                   raw_rec=dict(row),
                                    both_ways=False,
-                                   from_line=row,
+                                   from_line=indx,
                                    from_filename=xlsx_f,
                                    url=base_url+end_url)
 
@@ -350,6 +352,12 @@ def get_data(xlsx_files, year_months):
                                                            'data_type', 'airline'))
                         bulk.find(query).upsert().update_one({'$set': dic, '$setOnInsert': dict(inserted=now)})
             log.info('stored: %r', bulk.nresult)
+
+
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
 
 
 if __name__ == '__main__':
@@ -389,7 +397,7 @@ if __name__ == '__main__':
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(xlsx_files)))
     log.info('%d unknown airports', len(unknown_airports))
     if len(unknown_airports.index) > 0:
-        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
+        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), print_full(unknown_airports))
     if len(no_capa) > 0:
-        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), no_capa)
+        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), print_full(no_capa))
     log.info('End')

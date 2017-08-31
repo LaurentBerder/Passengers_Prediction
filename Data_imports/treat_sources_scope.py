@@ -209,6 +209,12 @@ def get_match(unique, for_segments=True, with_ref_code=False):
     return match
 
 
+def get_airlines_parents():
+    query = dict(parent={'$ne': None},
+                 company_type='airline')
+    return dict((c.code, c.parent) for c in Company.find(query))
+
+
 def calculate_ratios():
     """
     For all the external segment lines that do not contain overlap, compare the sum of passengers (and revenue if existing)
@@ -288,7 +294,7 @@ def spread_mass_update(unique, bulk):
     :param bulk: bulk
     :return:
     """
-    log.info('update')
+    log.info('        update')
     rev_ratio = unique.ratio.get('rev_ratio') or unique.ratio.get('pax_ratio')
 
     for segment in NewSegmentInitialData.find(get_match(unique)):
@@ -307,7 +313,9 @@ def spread_mass_update(unique, bulk):
                            data_type='updated_by_external_source',
                            initial_record=initial_record,
                            new_record=new_record,
-                           external_provider=unique['provider'])
+                           external_provider=unique['provider'],
+                           ratio=unique['ratio'],
+                           full_record=unique)
             with lock:
                 pass
                 bulk.find(segment.__id_dict__).update_one({'$set': new_record, '$push': dict(updated=updated)})
@@ -323,7 +331,7 @@ def spread_mass_create(unique, bulk, not_placed):
     :param not_placed: list
     :return:
     """
-    log.info('create')
+    log.info('        create')
 
     def new_seg(origin, destination, airline, airline_ref_code, ym, pax, rev, unique_id, provider, loaded_from_file):
         ym_ym = YearMonth(ym)
@@ -423,6 +431,12 @@ def save_new_segments(providers, not_placed):
     log.info('end store NewSegments: %r', bulk.nresult)
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 def cmd_line():
     parser = argparse.ArgumentParser(description='Adjust segments based on external sources for a single year month')
     parser.add_argument('ym', type=YearMonth, help='YearMonth (YYYY-MM) to deal with')
@@ -452,7 +466,10 @@ if __name__ == '__main__':
 
     year_month = str(p.ym)
     providers = [prov.provider for prov in Provider.find({'import_process': True})]
-    nb_overall_lines = External_Segment_Tmp.find({'year_month': year_month, 'provider': {'$in': providers}}).count()
+
+    airline_parents = get_airlines_parents()
+    lines = External_Segment_Tmp.find({'year_month': year_month, 'provider': {'$in': providers}})
+    nb_overall_lines = lines.count()
 
     if p.first_step == 1:
         # Phase 1 - Identify overlaps (possibly after deleting all previously identified ones, then save in external_segment
@@ -488,5 +505,5 @@ if __name__ == '__main__':
         col_to_keep = ['_id', 'origin', 'destination', 'year_month', 'airline',
                        'airline_ref_code', 'provider', 'from_filename']
         not_placed = not_placed[col_to_keep]
-        log.warning(not_placed)
+        log.warning(print_full(not_placed))
     log.info('End')

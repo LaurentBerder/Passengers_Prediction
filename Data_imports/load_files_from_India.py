@@ -176,18 +176,18 @@ def find_airports_by_name(name, perimeter):
     """
     if perimeter == "domestic":
         city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
-        airports = pd.DataFrame.from_records(list(Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'IN'},
+        airports = pd.DataFrame.from_records(list(Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}, 'country': 'IN'},
                                                   {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
         if airports.empty:
-            airports = pd.DataFrame.from_records(list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'IN'},
+            airports = pd.DataFrame.from_records(list(Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}, 'country': 'IN'},
                                                       {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
     else:
         city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
-        airports = pd.DataFrame.from_records(list(Airport.find({'query_names': city_clean, 'code_type': 'airport'},
+        airports = pd.DataFrame.from_records(list(Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}},
                                                   {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
         if airports.empty:
             airports = pd.DataFrame.from_records(
-                list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
+                list(Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}},
                                   {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
     return set(airports['code']) if not airports.empty else None
 
@@ -200,6 +200,12 @@ def update_unknown_airports(city, pax_to, pax_from):
     else:
         info = pd.Series({'city_name': city, 'passengers': pax_to + pax_from})
         unknown_airports = unknown_airports.append(info, ignore_index=True)
+
+
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
 
 
 def submit_query_providers():
@@ -386,7 +392,7 @@ if __name__ == '__main__':
     global unknown_airports
     if len(unknown_airports.index) > 0:
         unknown_airports = unknown_airports.sort_values('passengers', ascending=False)
-        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
+        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), print_full(unknown_airports))
     if len(no_capa) > 0:
-        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), no_capa)
+        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), print_full(no_capa))
     log.info('End')

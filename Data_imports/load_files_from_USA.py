@@ -190,6 +190,12 @@ def check_airport(airport, city, country, state, pax):
     return True
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 def get_data(csv_files):
     """
     Populate the database with data from csv files
@@ -357,8 +363,9 @@ if __name__ == '__main__':
     if len(wrong_airports.index) > 0:
         wrong_airports = wrong_airports.sort_values('passengers', ascending=False)
         log.warning("%s wrong or unknown airports (check the reasons why): \n%s", len(wrong_airports.index),
-                    wrong_airports)
+                    print_full(wrong_airports))
     if len(unknown_airlines.index) > 0:
         unknown_airlines = unknown_airlines.sort_values('passengers', ascending=False)
-        log.warning("%s unknown airlines (check the reasons why): \n%s", len(unknown_airlines.index), unknown_airlines)
+        log.warning("%s unknown airlines (check the reasons why): \n%s", len(unknown_airlines.index),
+                    print_full(unknown_airlines))
     log.info('End')

@@ -36,11 +36,8 @@ locale.setlocale(locale.LC_TIME, "en_US.utf8") # Make sure the months are expres
 provider = 'Australia'
 provider_tag = 'query_providers.%s' % provider
 __version__ = 'V1.0.0'
-unknown_airports = pd.DataFrame(columns=['code', 'city', 'country', 'passengers'])
 no_capa = list()
 airports_codes = dict()
-year = []
-month = []
 tmp_dir = '/tmp/australia'
 international_url = 'https://bitre.gov.au/publications/ongoing/international_airline_activity-time_series.aspx'
 domestic_url = 'https://bitre.gov.au/publications/ongoing/domestic_airline_activity-time_series.aspx'
@@ -135,41 +132,20 @@ def get_domestic_file():
             driver.close()
 
 
-def download_files(year, month):
+def download_files(year_months):
     """
     Check if requested year_months already exist in database. Download domestic and international files for processing
-    :param year:
-    :param month:
+    :param year_months: list of strings (YYYY-MM)
     :return:
     """
     if not os.path.isdir(tmp_dir):
         os.mkdir(tmp_dir)
-    if not isinstance(month, tuple) and not isinstance(year, tuple):
+    for ym in year_months:
         if External_Segment_Tmp.find_one(
-                {'year_month': str(year) + "-" + format(int(month), '02d'), 'provider': provider}):
+                {'year_month': ym, 'provider': provider}):
             log.warning("This year_month (%s) already exists for provider %s",
-                        str(year)+"-"+format(month, '02d'), provider)
-    else:
-        if isinstance(month, tuple) and isinstance(year, tuple):
-            for y in year:
-                for m in month:
-                    if External_Segment_Tmp.find_one(
-                            {'year_month': str(y) + "-" + format(m, '02d'), 'provider': provider}):
-                        log.warning("This year_month (%s) already exists for provider %s",
-                                    str(y) + "-" + format(m, '02d'), provider)
-        else:
-            if isinstance(month, tuple):
-                for m in month:
-                    if External_Segment_Tmp.find_one(
-                            {'year_month': str(year) + "-" + format(m, '02d'), 'provider': provider}):
-                        log.warning("This year_month (%s) already exists for provider %s",
-                                    str(year) + "-" + format(m, '02d'), provider)
-            else:
-                for y in year:
-                    if External_Segment_Tmp.find_one(
-                            {'year_month': str(y) + "-" + format(month, '02d'), 'provider': provider}):
-                        log.warning("This year_month (%s) already exists for provider %s",
-                                    str(y) + "-" + format(month, '02d'), provider)
+                        ym, provider)
+
     get_domestic_file()
     get_international_file()
     xlsx_files = os.listdir(tmp_dir)
@@ -183,26 +159,26 @@ def find_airports_by_name(name, perimeter):
     Failures of this function are reported at the end of the algorithm to enrich (manually) the "provider_query" with
     the help of submit_query_providers() function.
     :param name: an upper case string
-    :param tab_name: name of the excel file's tab (indication of international or mexican-only airports)
+    :param perimeter: string (indication of international or mexican-only airports)
     :return: airport code (or None)
     """
     if perimeter == "australian":
         city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
         airports = pd.DataFrame.from_records(
-            list(Airport.find({'query_names': city_clean, 'code_type': 'airport', 'country': 'AU'},
+            list(Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}, 'country': 'AU'},
                               {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
         if airports.empty:
             airports = pd.DataFrame.from_records(
-                list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport', 'country': 'AU'},
+                list(Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}, 'country': 'AU'},
                                   {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
     else:
         city_clean = name.lower().replace('.', '').split('-')[0].split('/')[0].split(',')[0].strip()
         airports = pd.DataFrame.from_records(
-            list(Airport.find({'query_names': city_clean, 'code_type': 'airport'},
+            list(Airport.find({'query_names': city_clean, 'code_type': {'$in': ['city','airport']}},
                               {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
         if airports.empty:
             airports = pd.DataFrame.from_records(
-                list(Airport.find({provider_tag: name.strip(), 'code_type': 'airport'},
+                list(Airport.find({provider_tag: name.strip(), 'code_type': {'$in': ['city','airport']}},
                                   {'_id': 0, 'code': 1, 'name': 1, 'city': 1})))
     return set(airports['code']) if not airports.empty else None
 
@@ -243,8 +219,8 @@ def check_airport(airport, pax, perimeter, city=None, country=None):
     :param airport: code
     :param pax: integer
     :param perimeter: 'domestic' or 'international'
-    :param city: name
-    :param country: name
+    :param city: string
+    :param country: string
     :return: False if airport not in database
     """
     global unknown_airports, airports_codes
@@ -276,8 +252,6 @@ def format_file(xlsx_f, perimeter):
     :param perimeter: a string, either "domestic" or "international"
     :return: the same DataFrame, with a standardized format
     """
-    global year
-    global month
     if perimeter == 'domestic':
         xls = pd.read_excel(tmp_dir + "/" + xlsx_f, sheetname="Top Routes")
         xls.drop(xls.columns[11:], axis=1, inplace=True)
@@ -289,34 +263,20 @@ def format_file(xlsx_f, perimeter):
         # Only keep real data
         xls = xls[pd.notnull(xls.To)]
         xls = xls[pd.notnull(xls.Month)]
-        # Only keep the requested year and months
-        if type(year) == tuple:
-            xls = xls[xls.Year.isin(year)]
-        else:
-            xls = xls[xls.Year == year]
-        if type(month) == tuple:
-            xls = xls[xls.Month.isin(month)]
-        else:
-            xls = xls[xls.Month == month]
+        # Write year_month
+        xls['year_month'] = xls.Year.map(str) + "-" + xls.Month.map("{:02}".format)
+        # Only keep the requested year_months
+        xls = xls[xls['year_month'].isin(year_months)]
         # Remove rows with no passenger counts
         xls['Passengers'] = pd.to_numeric(xls['Passengers'], errors='coerce')
         xls = xls[pd.notnull(xls.Passengers)]
-        # Write year_month
-        xls['year_month'] = xls.Year.map(str) + "-" + xls.Month.map("{:02}".format)
 
     else:
         xls = pd.read_excel(tmp_dir + "/" + xlsx_f, sheetname="Data", header=0)
         xls.drop(xls.columns[13:], axis=1, inplace=True)
         xls['year_month'] = xls['Month'].map(lambda x: str(x.year) + "-" + '%02d' % (x.month))
-        # Only keep the requested year and months
-        if type(year) == tuple:
-            xls = xls[xls.Month.dt.year.isin(year)]
-        else:
-            xls = xls[xls.Month.dt.year == year]
-        if type(month) == tuple:
-            xls = xls[xls.Month.dt.month.isin(month)]
-        else:
-            xls = xls[xls.Month.dt.month == month]
+        # Only keep the requested year_months
+        xls = xls[xls['Month'].isin(year_months)]
         # Remove rows with no passenger counts
         xls['TotalPax'] = pd.to_numeric(xls['TotalPax'], errors='coerce')
         xls['PaxIn'] = pd.to_numeric(xls['PaxIn'], errors='coerce')
@@ -330,6 +290,7 @@ def get_data(xlsx_files, year_months):
     Populate the database with data extract in xlsx files. One file per year_month, only one tab per file.
     Back/Forth routes in rows, one column per way.
     :param xlsx_files: dict of file names
+    :param year_months: list of strings (YYYY-MM)
     :return:
     """
     global provider, unknown_airports
@@ -478,6 +439,12 @@ def get_data(xlsx_files, year_months):
         log.info('stored: %r', bulk.nresult)
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Load data from Brazil')
     parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
@@ -500,19 +467,19 @@ if __name__ == '__main__':
     Model.init_db(def_w=True)
 
     year_months = p.year_months[0].split(', ')
-    year = list(set([ym[0:4] for ym in p.year_months]))
-    month = list(set([ym[6:7] for ym in p.year_months]))
     # submit_query_providers()   # update "provider_query" tags with previously unidentified airports
-    xlsx_files = download_files(year, month)
+    xlsx_files = download_files(year_months)
     # xlsx_files = os.listdir(tmp_dir)
     airports_codes = get_airports_codes()
 
+    unknown_airports = pd.DataFrame(columns=['code', 'city', 'country', 'passengers'])
+
     get_data(xlsx_files, year_months)
+
     log.info("\n\n--- %s seconds to populate db with %d files---" % ((time.time() - start_time), len(xlsx_files)))
-    global unknown_airports
     if len(unknown_airports.index) > 0:
         unknown_airports = unknown_airports.sort_values('passengers', ascending=False)
-        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
+        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), print_full(unknown_airports))
     if len(no_capa) > 0:
-        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), no_capa)
+        log.warning("%s international segments with no capacity (check the reasons why): ", len(no_capa), print_full(no_capa))
     log.info('End')

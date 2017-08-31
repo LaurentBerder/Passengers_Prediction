@@ -139,7 +139,6 @@ def update_latest_available_dates(providers):
             max_year_month = max(cols_to_keep).strip().replace('M','-')
             Provider.update(query={'provider': provider_country}, update={'$set': {'latest_ym_available': max_year_month}})
 
-
     if 'Ireland' in providers:
         # Ireland:
         provider = 'Ireland'
@@ -197,7 +196,6 @@ def update_latest_available_dates(providers):
         max_year_month = max(ym_list)
         Provider.update(query={'provider': provider}, update={'$set': {'latest_ym_available': max_year_month}})
 
-
     if 'India - intl' in providers:
         # India - intl:
         provider = 'India - intl'
@@ -219,7 +217,6 @@ def update_latest_available_dates(providers):
         max_year_month = max(yms)
         Provider.update(query={'provider': provider}, update={'$set': {'latest_ym_available': max_year_month}})
 
-
     if 'Australia - domestic' in providers:
         # Australia - domestic:
         provider = 'Australia - domestic'
@@ -237,7 +234,6 @@ def update_latest_available_dates(providers):
             Provider.update(query={'provider': provider}, update={'$set': {'latest_ym_available': max_year_month}})
         except Exception:
             log.exception('URL request failed for %s:', provider)
-
 
     if 'Australia - intl' in providers:
         # Australia - intl:
@@ -257,16 +253,16 @@ def update_latest_available_dates(providers):
         except Exception:
             log.exception('URL request failed for %s:', provider)
 
-    if 'Chile' in providers:
-        # Chile:
-        provider = 'Chile'
+    if 'Chili' in providers:
+        # Chili:
+        provider = 'Chili'
         log.info('  ----- Finding latest available year_month for %s' % provider)
         base_url = 'http://www.jac.gob.cl'
         string = 'Trafico-de-Par-de-ciudades-por-Operador'
         try:
             page = urllib.urlopen(base_url + '/estadisticas/estadisticas-historicas').read()
             soup = BeautifulSoup(page, 'lxml')
-            yms = {'Chile - intl': None, 'Chile - domestic': None}
+            yms = {'Chili - intl': None, 'Chili - domestic': None}
             for a in soup.find_all('a'):
                 if not a.get('href') or string not in a.get('href') or 'xls' not in a.get('href'):
                     continue
@@ -286,8 +282,8 @@ def update_latest_available_dates(providers):
                         else:
                             month = spanish_months.get(col.lower())
                     yms[provider_full] = max(yms.get(provider_full), str(year) + '-' + month)
-            if yms['Chile - intl'] == yms['Chile - domestic']:
-                Provider.update(query={'provider': provider}, update={'$set': {'latest_ym_available': yms['Chile - domestic']}})
+            if yms['Chili - intl'] == yms['Chili - domestic']:
+                Provider.update(query={'provider': provider}, update={'$set': {'latest_ym_available': yms['Chili - domestic']}})
             else:
                 print('Domestic and International files do not have the same dates available')
         except Exception:

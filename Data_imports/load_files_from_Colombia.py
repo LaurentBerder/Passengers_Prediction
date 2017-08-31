@@ -284,6 +284,12 @@ def get_data(xlsx_files):
         log.info('stored: %r', bulk.nresult)
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Load data from Colombia')
     parser.add_argument('year_months', type=str, nargs='+', help='Year_month(s) to download ([YYYY-MM, YYYY-MM...]')
@@ -325,9 +331,9 @@ if __name__ == '__main__':
     if len(unknown_airports.index) > 0:
         unknown_airports = unknown_airports.sort_values('passengers', ascending=False)
         log.warning("%s wrong or unknown airports (check the reasons why): \n%s", len(unknown_airports.index),
-                    unknown_airports)
+                    print_full(unknown_airports))
     if len(unknown_airlines.index) > 0:
         unknown_airlines = unknown_airlines.sort_values('passengers', ascending=False)
         log.warning("%s wrong or unknown airlines (check the reasons why): \n%s", len(unknown_airlines.index),
-                    unknown_airlines)
+                    print_full(unknown_airlines))
     log.info("End")

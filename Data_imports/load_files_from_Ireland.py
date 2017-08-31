@@ -173,6 +173,12 @@ def check_airport(airport, pax):
         return True
 
 
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
+
+
 def update_routes(csv_file, year_months):
     """
     Save new records in External_Segment collection
@@ -272,6 +278,6 @@ if __name__ == '__main__':
     update_routes(csv_file, year_months)
 
     if len(unknown_airports) > 0:
-        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), unknown_airports)
+        log.warning("%s unknown airports (check the reasons why): \n%s", len(unknown_airports.index), print_full(unknown_airports))
     log.info('End')
 
