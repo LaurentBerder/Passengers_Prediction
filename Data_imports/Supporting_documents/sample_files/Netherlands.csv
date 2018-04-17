@@ -1,0 +1,14 @@
+Aviation; monthly figures of Dutch airports,,,,,,,,,,,
+Periods,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*,2016 November*
+Subjects,Aircraft movements,Aircraft movements,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic,Commercial air traffic
+Subjects,Cross-country flights,Local flights,Flights,Passengers,Passengers,Passengers,Passengers,Cargo,Cargo,Cargo,Mail
+Subjects,Cross-country flights,Local flights,All flights,Total passengers,Passenger arrivals,Passenger departures,Country of origin/destination,Total cargo,Unloaded cargo,Loaded cargo,Total mail
+Subjects,Cross-country flights,Local flights,Total flights,Total passengers,Total arrivals passengers,Total departures passengers,Total country of origin/destination,Total cargo,Total unloaded cargo,Total loaded cargo,Total mail
+Airports,number,number,number,number,number,number,number,ton,ton,ton,ton
+Total Dutch airports,42990,4148,40403,5162840,2594898,2567942,5162840,153148,79080,74068,2619
+Amsterdam Airport Schiphol,37289,459,36325,4694112,2353958,2340154,4694112,146500,75640,70860,2619
+Rotterdam The Hague Airport,1888,1656,1213,93856,48098,45758,93856,0,0,0,0
+Eindhoven Airport,2478,0,2340,359269,184996,174273,359269,0,0,0,0
+Maastricht Aachen Airport,631,919,280,6486,3494,2992,6486,6648,3440,3208,0
+Groningen Airport Eelde,704,1114,245,9117,4352,4765,9117,0,0,0,0
+"� Statistics Netherlands, Den Haag/Heerlen 9-1-2017",,,,,,,,,,,
